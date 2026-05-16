@@ -29,7 +29,7 @@ export default function TenantManagerModal({ isOpen, onClose, tenants, onUpsert,
         if (isOpen) {
             if (startMode === "new") {
                 setEditingId("new");
-                setForm({ id: "", name: "", logoUrl: "https://picsum.photos/seed/brand/200/200", bio: "", settings: {} });
+                setForm({ id: "", name: "", logoUrl: "/logo.svg", bio: "", settings: {} });
             } else {
                 setEditingId(null);
             }
@@ -45,7 +45,7 @@ export default function TenantManagerModal({ isOpen, onClose, tenants, onUpsert,
 
     const startNew = () => {
         setEditingId("new");
-        setForm({ id: "", name: "", logoUrl: "https://picsum.photos/seed/brand/200/200", bio: "", settings: {} });
+        setForm({ id: "", name: "", logoUrl: "/logo.svg", bio: "", settings: {} });
     };
 
     const startEdit = (t: Tenant) => {
@@ -193,7 +193,7 @@ export default function TenantManagerModal({ isOpen, onClose, tenants, onUpsert,
                                                 <div className="flex items-start gap-4">
                                                     <img
                                                         src={form.logoUrl}
-                                                        alt=""
+                                                        alt={`${form.name || "Brand"} logo`}
                                                         className="w-16 h-16 rounded-xl bg-zinc-100 object-cover border border-zinc-200 shadow-sm shrink-0"
                                                         referrerPolicy="no-referrer"
                                                         onError={(e) => { (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${form.name || "Brand"}`; }}

@@ -4,7 +4,8 @@ import { motion, AnimatePresence } from "motion/react";
 import {
   ChevronLeft, ChevronRight, Copy, Grid3X3,
   Play, Send, X, CalendarDays, Clock, CheckCheck,
-  AlertCircle, Loader2, ImageOff, MessageSquare, Share2
+  AlertCircle, Loader2, ImageOff, MessageSquare, Share2,
+  Sun, Moon
 } from "lucide-react";
 import { useToast } from "./Toast";
 import { createAndCopyClientPostShare } from "../clientPostShare";
@@ -27,6 +28,8 @@ interface Props {
 
 import { isVideo, fallbackSvg, parseDateSafe, isPostVisibleToClient } from "../utils";
 import { createAndCopyClientPostShare } from "../clientPostShare";
+import OsirisLogo from "./OsirisLogo";
+import { useTheme } from "../theme";
 
 function PostStatusBadge({ status }: { status: Post["clientStatus"] }) {
   const cfg = {
@@ -296,6 +299,7 @@ function ScheduleRow({ post, onClick }: ScheduleRowProps) {
 
 /* ── Main component ───────────────────────────────────────── */
 export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, singlePostShareMode = false, postShareLinkEligible = false, adminToken = "", onUpdatePost, onAddComment, onDeleteComment }: Props) {
+  const { theme, toggleTheme } = useTheme();
   const visiblePosts = useMemo(
     () => (singlePostShareMode ? posts : posts.filter((p) => isPostVisibleToClient(p.clientStatus))),
     [posts, singlePostShareMode]
@@ -490,7 +494,7 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
           {/* Brand */}
           <div className="flex items-center gap-3 min-w-0">
             {logoUrl ? (
-              <img src={logoUrl} onError={(e) => { e.currentTarget.src = fallbackSvg; }} alt="" className="w-7 h-7 rounded-full object-cover border border-zinc-200" />
+              <img src={logoUrl} onError={(e) => { e.currentTarget.src = fallbackSvg; }} alt={`${displayName} logo`} className="w-7 h-7 rounded-full object-cover border border-zinc-200" />
             ) : (
               <div className="w-7 h-7 rounded-full bg-zinc-900 text-white flex items-center justify-center text-[10px] font-bold uppercase shrink-0">
                 {displayName.charAt(0)}
@@ -502,7 +506,14 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
           </div>
 
           {/* Progress / summary */}
-          <div ref={summaryRef} className="relative flex-shrink-0">
+          <div ref={summaryRef} className="relative flex-shrink-0 flex items-center gap-2">
+            <button
+              onClick={toggleTheme}
+              className="p-2 rounded-full text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 transition-colors"
+              title={theme === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode"}
+            >
+              {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            </button>
             <button
               onClick={() => setSummaryOpen((o) => !o)}
               className="flex items-center gap-3 group"
@@ -561,13 +572,17 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
           <div className="flex flex-col sm:flex-row items-center sm:items-start gap-6 sm:gap-10">
             {/* Avatar */}
             <div className="shrink-0">
-              <div className="w-20 h-20 sm:w-28 sm:h-28 md:w-36 md:h-36 rounded-full overflow-hidden border-2 border-zinc-200 ring-1 ring-zinc-100 shadow-sm bg-zinc-100">
-                <img
-                  src={logoUrl || `https://picsum.photos/seed/${tenantId}-avatar/300/300`}
-                  alt={displayName}
-                  className="w-full h-full object-cover"
-                  referrerPolicy="no-referrer"
-                />
+              <div className="w-20 h-20 sm:w-28 sm:h-28 md:w-36 md:h-36 rounded-full overflow-hidden border-2 border-zinc-200 ring-1 ring-zinc-100 shadow-sm bg-zinc-100 flex items-center justify-center">
+                {logoUrl ? (
+                  <img
+                    src={logoUrl}
+                    alt={displayName}
+                    className="w-full h-full object-cover"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <OsirisLogo size={120} />
+                )}
               </div>
             </div>
 
@@ -790,13 +805,17 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
                 <div className="flex-1 flex flex-col overflow-hidden min-h-0">
                   {/* Post header */}
                   <div className="p-4 border-b border-zinc-100 flex items-center gap-3 shrink-0">
-                    <div className="w-8 h-8 rounded-full overflow-hidden bg-zinc-100 shrink-0">
-                      <img
-                        src={logoUrl || `https://picsum.photos/seed/${tenantId}-avatar/100/100`}
-                        alt=""
-                        className="w-full h-full object-cover"
-                        referrerPolicy="no-referrer"
-                      />
+                    <div className="w-8 h-8 rounded-full overflow-hidden bg-zinc-100 shrink-0 flex items-center justify-center">
+                      {logoUrl ? (
+                        <img
+                          src={logoUrl}
+                          alt={`${displayName} logo`}
+                          className="w-full h-full object-cover"
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : (
+                        <OsirisLogo size={32} />
+                      )}
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="font-semibold text-sm leading-tight truncate">{tenantId}</p>

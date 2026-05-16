@@ -88,6 +88,26 @@ html {
   }
 }
 
+/* ── Light / Dark theme ─────────────────────────────────────── */
+/* Dark mode is the default. Light mode inverts Tailwind v4 zinc */
+/* CSS custom properties so existing bg-zinc-* and text-zinc-*   */
+/* classes flip automatically for page bg, cards, and secondary text. */
+/* text-white and bg-white are NOT inverted (cards/inputs/buttons */
+/* stay as-is; white-on-colored text stays readable). */
+[data-theme="light"] {
+  --color-zinc-50: #18181b;
+  --color-zinc-100: #27272a;
+  --color-zinc-200: #3f3f46;
+  --color-zinc-300: #52525b;
+  --color-zinc-400: #71717a;
+  --color-zinc-500: #a1a1aa;
+  --color-zinc-600: #d4d4d8;
+  --color-zinc-700: #e4e4e7;
+  --color-zinc-800: #f4f4f5;
+  --color-zinc-900: #ffffff;
+  --color-zinc-950: #fafafa;
+}
+
 /* ── Skeleton animations ────────────────────────────────────── */
 @keyframes shimmer {
   0% { background-position: -200% 0; }

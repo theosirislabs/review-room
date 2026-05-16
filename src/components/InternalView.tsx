@@ -7,7 +7,7 @@ import {
   CheckCircle2, CheckSquare, MessageSquare, Tag,
   Link, Layout, Lock, Copy, Settings, Share2,
   AlertCircle, Play, Send, Zap, Image as ImageIcon, Camera, Loader2,
-  Calendar, BarChart2, Flag, GitBranch,   ChevronDown
+  Calendar, BarChart2, Flag, GitBranch,   ChevronDown, Sun, Moon
 } from "lucide-react";
 import PostFormModal from "./PostFormModal";
 import ConfirmDialog from "./ConfirmDialog";
@@ -19,6 +19,8 @@ import AnalyticsView from "./AnalyticsView";
 import { useToast } from "./Toast";
 import { isVideo, fallbackSvg, parseDateSafe } from "../utils";
 import { createAndCopyClientPostShare } from "../clientPostShare";
+import { useTheme } from "../theme";
+import OsirisLogo from "./OsirisLogo";
 type AgencyRole = "super-admin" | "graphic-designer" | "marketing-team" | "reviewer";
 
 interface Props {
@@ -87,6 +89,7 @@ export default function InternalView({
 }: Props) {
   const role = currentUser?.role || "graphic-designer";
   const isSuperAdmin = role === "super-admin";
+  const { theme, toggleTheme } = useTheme();
   const canCreate = canCreateEdit(role);
   const canSchedule = canSchedulePost(role);
   const canReviewContent = canReview(role);
@@ -385,6 +388,7 @@ export default function InternalView({
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-8 sm:mb-10">
         <div className="space-y-1">
           <div className="flex items-center gap-3 text-zinc-400 text-sm font-medium mb-1">
+            <OsirisLogo size={18} className="shrink-0" />
             <button
               onClick={() => _onSwitchTenant("")}
               className="text-zinc-400 hover:text-white transition-colors"
@@ -422,7 +426,7 @@ export default function InternalView({
                           className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors ${isCurrent ? "bg-indigo-50 text-indigo-700" : "hover:bg-zinc-50 text-zinc-700"}`}
                         >
                           {t.logoUrl ? (
-                            <img src={t.logoUrl} alt="" className="w-7 h-7 rounded-lg object-cover border border-zinc-200" onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                            <img src={t.logoUrl} alt={`${t.name} logo`} className="w-7 h-7 rounded-lg object-cover border border-zinc-200" onError={(e) => { e.currentTarget.style.display = "none"; }} />
                           ) : (
                             <div className="w-7 h-7 rounded-lg bg-zinc-200 flex items-center justify-center text-[10px] font-bold text-zinc-500">{t.name?.charAt(0) || "?"}</div>
                           )}
@@ -482,6 +486,13 @@ export default function InternalView({
           </div>
           <button onClick={() => setShowShareModal(true)} className="flex items-center gap-2 bg-white border border-zinc-200 hover:border-zinc-300 text-zinc-700 px-4 py-2.5 rounded-xl text-sm font-bold transition-all shadow-sm active:scale-95">
             <Link className="w-4 h-4" /> <span className="hidden sm:inline">Share Links</span>
+          </button>
+          <button
+            onClick={toggleTheme}
+            className="flex items-center gap-2 bg-white border border-zinc-200 hover:border-zinc-300 text-zinc-700 px-3 py-2.5 rounded-xl text-sm font-bold transition-all shadow-sm active:scale-95"
+            title={theme === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode"}
+          >
+            {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
           </button>
           <button onClick={() => setShowCampaignModal(true)} className="flex items-center gap-2 bg-white border border-zinc-200 hover:border-zinc-300 text-zinc-700 px-3 py-2.5 rounded-xl text-sm font-bold transition-all shadow-sm active:scale-95" title="Campaigns">
             <Flag className="w-4 h-4" /> <span className="hidden sm:inline">Campaigns</span>

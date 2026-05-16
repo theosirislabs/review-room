@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from "motion/react";
-import { Copy, Trash2, Grid, Settings, Shield, Search, RefreshCcw, TrendingUp, AlertCircle, CheckCircle2, Clock, RotateCcw, ChevronRight, Lock, Plus, LogOut } from "lucide-react";
+import { Copy, Trash2, Grid, Settings, Shield, Search, RefreshCcw, TrendingUp, AlertCircle, CheckCircle2, Clock, RotateCcw, ChevronRight, Lock, Plus, LogOut, Sun, Moon } from "lucide-react";
 import { useToast } from "./Toast";
 import { useState, useEffect } from "react";
 import useSWR from "swr";
@@ -9,6 +9,8 @@ import ActivityFeed from "./ActivityFeed";
 import UserManagementModal from "./UserManagementModal";
 import { ActivityEvent } from "../types";
 import { Button } from "./ui/Button";
+import { useTheme } from "../theme";
+import OsirisLogo from "./OsirisLogo";
 
 interface Tenant {
     id: string;
@@ -65,6 +67,7 @@ export default function DashboardView({
 }) {
     const isSuperAdmin = currentUser?.role === "super-admin";
     const { success, error: toastError } = useToast();
+    const { theme, toggleTheme } = useTheme();
     const [showManager, setShowManager] = useState(false);
     const [managerMode, setManagerMode] = useState<"list" | "new">("list");
     const [showUserModal, setShowUserModal] = useState(false);
@@ -117,9 +120,8 @@ export default function DashboardView({
                 
                 <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }} className="w-full max-w-md z-10">
                     <div className="flex flex-col items-center mb-10">
-                        <div className="w-20 h-20 bg-zinc-900 border border-zinc-800 rounded-[2rem] flex items-center justify-center text-white font-black shadow-2xl relative group overflow-hidden mb-6">
-                            <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/20 to-purple-600/20 group-hover:scale-110 transition-transform duration-500" />
-                            <span className="text-4xl relative z-10">O</span>
+                        <div className="mb-6">
+                            <OsirisLogo size={80} />
                         </div>
                         <h1 className="text-3xl font-black text-white tracking-tighter mb-2">OSIRIS COMMAND</h1>
                         <div className="flex items-center gap-2 px-3 py-1 bg-zinc-900/50 border border-zinc-800 rounded-full">
@@ -197,6 +199,16 @@ export default function DashboardView({
                                     </>
                                 )}
                             </button>
+                            <div className="flex justify-center">
+                                <button
+                                    type="button"
+                                    onClick={toggleTheme}
+                                    className="flex items-center gap-2 px-4 py-2 text-xs font-bold uppercase tracking-wider text-zinc-500 hover:text-zinc-300 transition-colors"
+                                >
+                                    {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+                                    {theme === "dark" ? "Light Mode" : "Dark Mode"}
+                                </button>
+                            </div>
                         </div>
                     </form>
                     
@@ -277,13 +289,20 @@ export default function DashboardView({
                 <div className="max-w-7xl mx-auto w-full px-6 pt-8 pb-6">
                     <header className="flex items-center justify-between mb-8">
                         <div className="flex items-center gap-4">
-                            <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-xl flex items-center justify-center text-white font-black shadow-lg shadow-indigo-500/20">O</div>
+                            <OsirisLogo size={40} className="shrink-0" />
                             <div>
                                 <h1 className="text-2xl font-black tracking-tight text-white">Osiris Command Center</h1>
                                 <p className="text-zinc-500 text-sm font-medium">Global Agency Dashboard · {tenants.length} client workspace{tenants.length !== 1 ? "s" : ""}</p>
                             </div>
                         </div>
                         <div className="flex items-center gap-2">
+                            <button
+                                onClick={toggleTheme}
+                                className="p-2 rounded-xl text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50 transition-colors"
+                                title={theme === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode"}
+                            >
+                                {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+                            </button>
                             <div className="relative">
                                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-600" />
                                 <input
@@ -342,12 +361,16 @@ export default function DashboardView({
                                     {/* Top section */}
                                     <div className="p-5 flex items-start justify-between">
                                         <div className="flex items-center gap-3">
-                                            <img
-                                                src={tenant.logoUrl || `https://ui-avatars.com/api/?name=${tenant.id}&background=6366f1&color=fff`}
-                                                alt={tenant.name}
-                                                className="w-12 h-12 rounded-xl object-cover shadow-lg border border-zinc-800"
-                                                onError={(e) => { (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${tenant.id}&background=6366f1&color=fff`; }}
-                                            />
+                                            {tenant.logoUrl ? (
+                                                <img
+                                                    src={tenant.logoUrl}
+                                                    alt={`${tenant.name} logo`}
+                                                    className="w-12 h-12 rounded-xl object-cover shadow-lg border border-zinc-800"
+                                                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; (e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden'); }}
+                                                />
+                                            ) : (
+                                                <OsirisLogo size={48} className="rounded-xl shadow-lg border border-zinc-800 shrink-0" />
+                                            )}
                                             <div>
                                                 <h2 className="text-base font-black text-white group-hover:text-indigo-300 transition-colors">{tenant.name}</h2>
                                                 <div className="flex items-center gap-2 mt-0.5">
