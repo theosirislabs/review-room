@@ -180,7 +180,7 @@ if (tenantCount.count === 0) {
   const insertTenant = db.prepare("INSERT INTO tenants (id, name, logoUrl, bio, settings) VALUES (?, ?, ?, ?, ?)");
   insertTenant.run("acmecorp", "Acme Corp", "https://picsum.photos/seed/acme/200/200", "A leading manufacturer of everything.", JSON.stringify({ theme: "default" }));
   insertTenant.run("osiris", "Osiris Labs", "https://picsum.photos/seed/osiris/200/200", "Artificial Intelligence & Creative Studio.", JSON.stringify({ theme: "dark" }));
-  insertTenant.run("demo", "Demo Client", "https://picsum.photos/seed/demo/200/200", "Just a demo account for testing.", JSON.stringify({ theme: "default" }));
+  insertTenant.run("fahmy", "Fahmy Properties", "https://picsum.photos/seed/fahmy/200/200", "Premium real estate development in Egypt — luxury residential & commercial properties.", JSON.stringify({ theme: "default" }));
 }
 
 // ── Password hashing ───────────────────────────────────────────
@@ -216,6 +216,9 @@ if (campaignCount.count === 0) {
   const ins = db.prepare("INSERT INTO campaigns (id, tenantId, name, code, color, startDate, endDate, description, createdAt) VALUES (?,?,?,?,?,?,?,?,?)");
   ins.run(randomUUID(), "acmecorp", "Spring Launch 2026", "SPR26-LCH", "#6366f1", "2026-03-01", "2026-03-31", "Spring collection launch campaign.", new Date().toISOString());
   ins.run(randomUUID(), "acmecorp", "Always On", "ALW-ON", "#10b981", "2026-01-01", "2026-12-31", "Ongoing evergreen content.", new Date().toISOString());
+  // Fahmy Properties campaigns
+  ins.run(randomUUID(), "fahmy", "Brand Awareness — Always On", "BRND-AW", "#10b981", "2026-01-01", "2026-12-31", "Ongoing brand presence and property showcase.", new Date().toISOString());
+  ins.run(randomUUID(), "fahmy", "Luxury Developments Q2", "LUX-Q2", "#f59e0b", "2026-04-01", "2026-06-30", "Premium residential property campaign.", new Date().toISOString());
 }
 
 // ── Seed Content Pillars ──────────────────────────────────────
@@ -231,6 +234,14 @@ if (pillarCount.count === 0) {
     { name: "Promotional", color: "#ef4444" },
   ];
   pillars.forEach(p => ins.run(randomUUID(), "acmecorp", p.name, p.color));
+  // Fahmy Properties content pillars
+  const fahmyPillars = [
+    { name: "Property Showcase", color: "#f59e0b" },
+    { name: "Lifestyle", color: "#10b981" },
+    { name: "Design & Architecture", color: "#3b82f6" },
+    { name: "Motion Reels", color: "#ec4899" },
+  ];
+  fahmyPillars.forEach(p => ins.run(randomUUID(), "fahmy", p.name, p.color));
 }
 
 // ── Multer ────────────────────────────────────────────────────
@@ -372,6 +383,127 @@ if (count.count === 0) {
       thumbnailUrl: "https://picsum.photos/seed/sale-thumb/400/500", revisionCount: 0,
       comments: [], tasks: [],
     },
+    // ── Fahmy Properties seed posts (based on live data) ──────
+    { id: "f1", tenantId: "fahmy", title: "Idea 1: Post 1", format: "image",
+      mediaUrls: JSON.stringify(["https://picsum.photos/seed/fahmy1/800/1000"]),
+      caption: "Where every view, every step, and every moment feels naturally connected.",
+      hashtags: JSON.stringify(["#FahmyProperties", "#LuxuryLiving", "#RealEstate"]),
+      date: "2026-04-28", time: "12:00 PM", clientStatus: "Approved", internalStatus: "Approved",
+      assignee: "Unassigned", campaignCode: "BRND-AW", contentPillar: "Property Showcase",
+      internalNotes: "", assetLineage: "", isBlocked: 0, blockedReason: null,
+      thumbnailUrl: "", revisionCount: 0, comments: [], tasks: [] },
+    { id: "f2", tenantId: "fahmy", title: "Idea 1: Post 2", format: "image",
+      mediaUrls: JSON.stringify(["https://picsum.photos/seed/fahmy2/800/1000"]),
+      caption: "Open spaces, seamless surroundings, and a rhythm that just feels right.",
+      hashtags: JSON.stringify(["#FahmyProperties", "#ModernLiving", "#Architecture"]),
+      date: "2026-04-28", time: "12:00 PM", clientStatus: "Approved", internalStatus: "Approved",
+      assignee: "Unassigned", campaignCode: "BRND-AW", contentPillar: "Design & Architecture",
+      internalNotes: "", assetLineage: "", isBlocked: 0, blockedReason: null,
+      thumbnailUrl: "", revisionCount: 0, comments: [], tasks: [] },
+    { id: "f3", tenantId: "fahmy", title: "Idea 1: Post 3", format: "image",
+      mediaUrls: JSON.stringify(["https://picsum.photos/seed/fahmy3/800/1000"]),
+      caption: "Designed for ease, so your day unfolds the way it should.",
+      hashtags: JSON.stringify(["#FahmyProperties", "#Lifestyle", "#EverydayLuxury"]),
+      date: "2026-04-28", time: "12:00 PM", clientStatus: "Approved", internalStatus: "Approved",
+      assignee: "Unassigned", campaignCode: "BRND-AW", contentPillar: "Lifestyle",
+      internalNotes: "", assetLineage: "", isBlocked: 0, blockedReason: null,
+      thumbnailUrl: "", revisionCount: 0, comments: [], tasks: [] },
+    { id: "f4", tenantId: "fahmy", title: "Idea 2: Post 1", format: "image",
+      mediaUrls: JSON.stringify(["https://picsum.photos/seed/fahmy4/800/1000"]),
+      caption: "When everything around you is designed to feel this easy, calm becomes part of your everyday.",
+      hashtags: JSON.stringify(["#FahmyProperties", "#CalmLiving", "#Space"]),
+      date: "2026-04-28", time: "12:00 PM", clientStatus: "Approved", internalStatus: "Approved",
+      assignee: "Unassigned", campaignCode: "BRND-AW", contentPillar: "Property Showcase",
+      internalNotes: "", assetLineage: "", isBlocked: 0, blockedReason: null,
+      thumbnailUrl: "", revisionCount: 0, comments: [], tasks: [] },
+    { id: "f5", tenantId: "fahmy", title: "Idea 2: Post 2", format: "image",
+      mediaUrls: JSON.stringify(["https://picsum.photos/seed/fahmy5/800/1000"]),
+      caption: "Less noise, more clarity — exactly how your space should feel.",
+      hashtags: JSON.stringify(["#FahmyProperties", "#Minimalist", "#Design"]),
+      date: "2026-04-28", time: "12:00 PM", clientStatus: "Approved", internalStatus: "Approved",
+      assignee: "Unassigned", campaignCode: "BRND-AW", contentPillar: "Design & Architecture",
+      internalNotes: "", assetLineage: "", isBlocked: 0, blockedReason: null,
+      thumbnailUrl: "", revisionCount: 0, comments: [], tasks: [] },
+    { id: "f6", tenantId: "fahmy", title: "Idea 2: Post 3", format: "image",
+      mediaUrls: JSON.stringify(["https://picsum.photos/seed/fahmy6/800/1000"]),
+      caption: "Clean lines, open space, and a rhythm that feels steady from the start.",
+      hashtags: JSON.stringify(["#FahmyProperties", "#OpenSpaces", "#Architecture"]),
+      date: "2026-04-28", time: "12:00 PM", clientStatus: "Approved", internalStatus: "Approved",
+      assignee: "Unassigned", campaignCode: "BRND-AW", contentPillar: "Property Showcase",
+      internalNotes: "", assetLineage: "", isBlocked: 0, blockedReason: null,
+      thumbnailUrl: "", revisionCount: 0, comments: [], tasks: [] },
+    { id: "f7", tenantId: "fahmy", title: "Idea 3: Post 1", format: "image",
+      mediaUrls: JSON.stringify(["https://picsum.photos/seed/fahmy7/800/1000"]),
+      caption: "Not an escape, not a destination — just part of how your day naturally unfolds.",
+      hashtags: JSON.stringify(["#FahmyProperties", "#NatureLiving", "#Everyday"]),
+      date: "2026-04-28", time: "12:00 PM", clientStatus: "Approved", internalStatus: "Approved",
+      assignee: "Unassigned", campaignCode: "LUX-Q2", contentPillar: "Lifestyle",
+      internalNotes: "", assetLineage: "", isBlocked: 0, blockedReason: null,
+      thumbnailUrl: "", revisionCount: 0, comments: [], tasks: [] },
+    { id: "f8", tenantId: "fahmy", title: "Idea 3: Post 2", format: "image",
+      mediaUrls: JSON.stringify(["https://picsum.photos/seed/fahmy8/800/1000"]),
+      caption: "Every element is placed with intention — from water and greenery to open spaces that flow together.",
+      hashtags: JSON.stringify(["#FahmyProperties", "#Landscape", "#Design"]),
+      date: "2026-04-28", time: "12:00 PM", clientStatus: "Approved", internalStatus: "Approved",
+      assignee: "Unassigned", campaignCode: "LUX-Q2", contentPillar: "Design & Architecture",
+      internalNotes: "", assetLineage: "", isBlocked: 0, blockedReason: null,
+      thumbnailUrl: "", revisionCount: 0, comments: [], tasks: [] },
+    { id: "f9", tenantId: "fahmy", title: "Idea 3: Post 3", format: "image",
+      mediaUrls: JSON.stringify(["https://picsum.photos/seed/fahmy9/800/1000"]),
+      caption: "A layout that naturally leads you through spaces designed for both movement and pause.",
+      hashtags: JSON.stringify(["#FahmyProperties", "#Architecture", "#Space"]),
+      date: "2026-04-28", time: "12:00 PM", clientStatus: "Approved", internalStatus: "Approved",
+      assignee: "Unassigned", campaignCode: "LUX-Q2", contentPillar: "Property Showcase",
+      internalNotes: "", assetLineage: "", isBlocked: 0, blockedReason: null,
+      thumbnailUrl: "", revisionCount: 0, comments: [], tasks: [] },
+    { id: "f10", tenantId: "fahmy", title: "Idea 4: Post 1", format: "image",
+      mediaUrls: JSON.stringify(["https://picsum.photos/seed/fahmy10/800/1000"]),
+      caption: "Every moment begins with the environment around you. Open, calm, and ready to be lived in.",
+      hashtags: JSON.stringify(["#FahmyProperties", "#InteriorDesign", "#LivingSpace"]),
+      date: "2026-04-28", time: "12:00 PM", clientStatus: "Approved", internalStatus: "Approved",
+      assignee: "Unassigned", campaignCode: "LUX-Q2", contentPillar: "Lifestyle",
+      internalNotes: "", assetLineage: "", isBlocked: 0, blockedReason: null,
+      thumbnailUrl: "", revisionCount: 0, comments: [], tasks: [] },
+    { id: "f11", tenantId: "fahmy", title: "Idea 4: Post 2", format: "image",
+      mediaUrls: JSON.stringify(["https://picsum.photos/seed/fahmy11/800/1000"]),
+      caption: "Designed for more than just views — this is where movement, connection, and everyday moments come together.",
+      hashtags: JSON.stringify(["#FahmyProperties", "#LivingDesign", "#Space"]),
+      date: "2026-04-28", time: "12:00 PM", clientStatus: "Approved", internalStatus: "Approved",
+      assignee: "Unassigned", campaignCode: "LUX-Q2", contentPillar: "Property Showcase",
+      internalNotes: "", assetLineage: "", isBlocked: 0, blockedReason: null,
+      thumbnailUrl: "", revisionCount: 0, comments: [], tasks: [] },
+    { id: "f12", tenantId: "fahmy", title: "Idea 4: Post 3", format: "image",
+      mediaUrls: JSON.stringify(["https://picsum.photos/seed/fahmy12/800/1000"]),
+      caption: "From one moment to the next, everything feels connected — shaped by a space that simply works.",
+      hashtags: JSON.stringify(["#FahmyProperties", "#SeamlessLiving", "#Design"]),
+      date: "2026-04-28", time: "12:00 PM", clientStatus: "Approved", internalStatus: "Approved",
+      assignee: "Unassigned", campaignCode: "LUX-Q2", contentPillar: "Design & Architecture",
+      internalNotes: "", assetLineage: "", isBlocked: 0, blockedReason: null,
+      thumbnailUrl: "", revisionCount: 0, comments: [], tasks: [] },
+    { id: "f13", tenantId: "fahmy", title: "Idea 5: Post 1", format: "image",
+      mediaUrls: JSON.stringify(["https://picsum.photos/seed/fahmy13/800/1000"]),
+      caption: "From the smallest corners to the overall space, every detail is shaped with intention.",
+      hashtags: JSON.stringify(["#FahmyProperties", "#Detail", "#Craftsmanship"]),
+      date: "2026-04-28", time: "12:00 PM", clientStatus: "Approved", internalStatus: "Approved",
+      assignee: "Unassigned", campaignCode: "LUX-Q2", contentPillar: "Property Showcase",
+      internalNotes: "", assetLineage: "", isBlocked: 0, blockedReason: null,
+      thumbnailUrl: "", revisionCount: 0, comments: [], tasks: [] },
+    { id: "f14", tenantId: "fahmy", title: "Idea 5: Post 2", format: "image",
+      mediaUrls: JSON.stringify(["https://picsum.photos/seed/fahmy14/800/1000"]),
+      caption: "A space designed for how you actually live — open, comfortable, and naturally connected to the outdoors.",
+      hashtags: JSON.stringify(["#FahmyProperties", "#OutdoorLiving", "#Comfort"]),
+      date: "2026-04-28", time: "12:00 PM", clientStatus: "Approved", internalStatus: "Approved",
+      assignee: "Unassigned", campaignCode: "LUX-Q2", contentPillar: "Lifestyle",
+      internalNotes: "", assetLineage: "", isBlocked: 0, blockedReason: null,
+      thumbnailUrl: "", revisionCount: 0, comments: [], tasks: [] },
+    { id: "f15", tenantId: "fahmy", title: "Idea 5: Post 3", format: "image",
+      mediaUrls: JSON.stringify(["https://picsum.photos/seed/fahmy15/800/1000"]),
+      caption: "From slow mornings to shared meals, the space adapts effortlessly to your routine.",
+      hashtags: JSON.stringify(["#FahmyProperties", "#EverydayLiving", "#Home"]),
+      date: "2026-04-28", time: "12:00 PM", clientStatus: "Approved", internalStatus: "Approved",
+      assignee: "Unassigned", campaignCode: "LUX-Q2", contentPillar: "Lifestyle",
+      internalNotes: "", assetLineage: "", isBlocked: 0, blockedReason: null,
+      thumbnailUrl: "", revisionCount: 0, comments: [], tasks: [] },
   ];
 
   db.transaction(() => {
