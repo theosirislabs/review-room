@@ -2,25 +2,6 @@
 
 A dual-lens social media content review engine for agencies and clients. Built with React, Vite, Express, Socket.io, and SQLite.
 
-![Dashboard](screenshots/dashboard-mockup.png)
-*Dashboard — Agency view with KPI cards, review queue, and activity feed*
-
-![Client Portal](screenshots/client-portal-mockup.png)
-*Client Portal — Simplified review interface for clients*
-
-## Features
-
-- **Dual-Lens Architecture** — Agency and client views for streamlined content approval
-- **Real-Time Updates** — Socket.io-powered live activity feed and instant status changes
-- **Multi-Platform Content** — Manage posts for Instagram, TikTok, Facebook, LinkedIn and more
-- **Campaign Management** — Organize content by campaign, client, and platform
-- **Batch Upload & Processing** — Upload and process multiple media files simultaneously
-- **Review Workflow** — Approve, reject, or request changes with one click
-- **Client Portal** — Simplified interface for clients to review and approve content
-- **Analytics Dashboard** — Track review activity, approval rates, and platform distribution
-- **Team Management** — Manage users, roles, and permissions across tenants
-- **Calendar View** — Plan and visualize content schedules
-
 ## Architecture
 
 - **Frontend:** React 19 + TailwindCSS v4 + Framer Motion
