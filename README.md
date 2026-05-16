@@ -2,6 +2,37 @@
 
 A dual-lens social media content review engine for agencies and clients. Built with React, Vite, Express, Socket.io, and SQLite.
 
+![Dashboard](screenshots/dashboard-thumb.png)
+*Osiris Command Center — agency dashboard with client workspace cards and live activity feed*
+
+## Features
+
+- **Agency + Client Views** — Separate portals for content teams and clients
+- **Real-Time Updates** — Socket.io-powered live activity feed
+- **Workspace Management** — Multi-tenant architecture with per-client isolation
+- **Content Review Workflow** — Approve, reject, request changes through the pipeline
+- **Media Upload** — Drag-and-drop file upload with batch processing
+- **Campaign Organization** — Group content by campaign, content pillar, and platform
+- **Analytics Dashboard** — Track review activity and status distribution
+- **Calendar & Scheduling** — Plan and visualize content timelines
+
+## Quick Start
+
+```bash
+npm install
+npm run dev     # Development mode (Vite hot-reload + Express backend)
+```
+
+First run auto-seeds demo data with admin login:
+- **Username:** `admin@reviewroom.local`
+- **Password:** `demo2026`
+
+For production:
+```bash
+npm run build
+NODE_ENV=production npx tsx server.ts
+```
+
 ## Architecture
 
 - **Frontend:** React 19 + TailwindCSS v4 + Framer Motion
