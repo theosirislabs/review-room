@@ -1,102 +1,81 @@
 # OSIRIS Review Room
 
-A dual-lens social media content review engine for agencies and clients. Built with React, Vite, Express, Socket.io, and SQLite.
+A content review engine for agencies and their clients. No more WhatsApp chaos, no more "which version is this," no more screenshots of screenshots.
 
-![Agency View](screenshots/agency-view.png)
-*Agency Review Room — content grid for Fahmy Properties with filtering, bulk upload, and real-time status*
+Agencies post. Clients approve. Both see the same thing in real time.
 
-![Client Portal](screenshots/client-view.png)
-*Client Review Portal — simplified approval interface for Fahmy Properties showing 17/20 reviewed*
+![Command Center](screenshots/command-center.png)
+*The command center — all your clients, their progress, and what's happening right now*
 
-## Features
+![Client Posts Review](screenshots/client-posts.png)
+*A full content grid where clients browse, pick, and approve*
 
-- **Agency + Client Views** — Separate portals for content teams and clients
-- **Real-Time Updates** — Socket.io-powered live activity feed
-- **Workspace Management** — Multi-tenant architecture with per-client isolation
-- **Content Review Workflow** — Approve, reject, request changes through the pipeline
-- **Media Upload** — Drag-and-drop file upload with batch processing
-- **Campaign Organization** — Group content by campaign, content pillar, and platform
-- **Analytics Dashboard** — Track review activity and status distribution
-- **Calendar & Scheduling** — Plan and visualize content timelines
+![Client Schedule](screenshots/client-schedule.png)
+*Scheduled posts — what's going out, when, and what's been signed off*
 
-## Quick Start
+## What it does
+
+- **Command Center** — See all your clients at once. Who's at 80% approval. Who has 21 posts stuck in review. What changed 5 minutes ago.
+- **Agency View** — Full production cockpit. Post grid, status management, internal notes, bulk upload. The messy side.
+- **Client View** — Clean, simple, Instagram-like. Clients see their content, approve what they like, request changes on what they don't. No noise.
+- **Schedule** — What's going live, when, and whether the client has signed off. Calendar view with status badges.
+- **Theme toggle** — Dark mode for late nights. Light mode for client meetings. Sticks to your preference.
+- **Your brand, not ours** — Upload your logo. It replaces ours on every screen, every email, every share link.
+- **Real-time** — Approve something on the client side? The agency sees it instantly. Socket.io under the hood.
+- **Multi-tenant** — Every client gets their own isolated workspace with their own secure token. No cross-contamination.
+
+## Tech stack
+
+| What | How |
+|---|---|
+| Frontend | React 19 + TailwindCSS v4 + Framer Motion |
+| Backend | Express + Socket.io |
+| Database | SQLite |
+| Server | TypeScript via tsx |
+| Auth | Token-based per workspace |
+
+## Run it locally
 
 ```bash
 npm install
-npm run dev     # Development mode (Vite hot-reload + Express backend)
+npm run dev
 ```
 
-First run auto-seeds demo data with admin login:
-- **Username:** `admin@reviewroom.local`
-- **Password:** `demo2026`
+First run auto-seeds demo data with three workspaces and a super-admin account.
 
-For production:
-```bash
-npm run build
-NODE_ENV=production npx tsx server.ts
-```
+**Demo login:** `admin@reviewroom.local` / `demo2026`
 
-## Architecture
+Open `http://localhost:3000`
 
-- **Frontend:** React 19 + TailwindCSS v4 + Framer Motion
-- **Backend:** Express + Socket.io (real-time updates)
-- **Database:** SQLite via better-sqlite3
-- **Server:** TypeScript via tsx
-
-## Running Locally
-
-**Prerequisites:** Node.js 20+
-
-1. Install dependencies:
-   ```bash
-   npm install
-   ```
-
-2. Run in development mode:
-   ```bash
-   npm run dev
-   ```
-
-3. Open `http://localhost:3000`
-
-## Production Deployment & Security
-
-The application now uses a secure tokenized authentication model for multi-tenant access.
+## Production
 
 ```bash
-# Build the Docker image
 docker build -t osiris-review-room:latest .
-
-# Run via docker-compose
-docker-compose up -d --force-recreate
+docker-compose up -d
 ```
 
-Deployed at: `https://review-room.theosirislabs.com`
+Live at: `https://review-room.theosirislabs.com`
 
-### Large Video Uploads
+### Large files
 
-If uploads fail at ~12% with a network error, the domain is likely behind **Cloudflare**, which has a 100-second timeout on free plans. Options:
+Uploading video and hitting a wall at 12%? Cloudflare's free tier has a 100-second timeout. Bypass it with a DNS-only subdomain for uploads, or upgrade to Cloudflare Enterprise.
 
-1. **Bypass Cloudflare for uploads:** Create a DNS-only (grey cloud) subdomain, e.g. `upload-review-room.theosirislabs.com`, pointing to the same server. Use that subdomain for the app when uploading large files.
-2. **Upgrade Cloudflare:** Enterprise plans support longer timeouts.
-3. **Traefik timeouts:** The deployment includes extended Traefik timeouts (30 min) for the review-room service. Ensure the `upload-transports.yml` and `longUploadTransport` are loaded by Traefik.
+### Getting your invite link
 
-### Access Control
-
-When the container builds and starts, it automatically provisions random secure tokens for any new tenants. These tokens are required to access their respective views. 
-
-**Getting your initial access URL:**
-You can retrieve the secure login links by checking the docker logs:
 ```bash
 docker logs --tail 200 review-room-app | grep "Copy Internal Link"
 ```
 
-Once logged into the **Internal View**, you can click the **"Copy Link"** button in the bottom right corner to generate the secure invite link for the Client.
+Or once logged into the agency view, click "Copy Link" to generate a secure client invite URL.
 
-## Features
+## Screenshots
 
-- **Internal View** — Agency-side production cockpit with post grid, status management, task checklists, internal notes, and asset lineage tracking. Access is strictly blocked without valid `token=` URL parameter.
-- **Client View** — Clean Instagram-like review interface for clients to approve or request changes. Cannot view internal task notes. Access is explicitly secured via their dedicated token.
-- **Real-time sync** — Socket.io keeps both views in sync instantly
-- **Multi-Tenant Routing** — Fully isolated workspaces accessed via `?tenant=<id>&mode=<internal|client>&token=<secure_token>`.
-- **Persistent storage** — SQLite database with automatic seeding
+- [`screenshots/command-center.png`](screenshots/command-center.png) — Agency dashboard with 8 workspaces
+- [`screenshots/client-posts.png`](screenshots/client-posts.png) — Full posts grid
+- [`screenshots/client-schedule.png`](screenshots/client-schedule.png) — Schedule with 20 posts
+- [`screenshots/agency-view.png`](screenshots/agency-view.png) — Agency content management
+- [`screenshots/client-view.png`](screenshots/client-view.png) — Client approval portal
+
+---
+
+OSIRIS LABS © 2026
