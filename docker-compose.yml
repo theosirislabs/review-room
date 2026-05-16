@@ -1,0 +1,42 @@
+services:
+  review-room:
+    image: osiris-review-room:latest
+    container_name: review-room-app
+    restart: always
+    volumes:
+      - ./data:/app/data
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - AGENCY_PASSWORD=osiris2026
+    networks:
+      - dokploy_default
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          memory: 256M
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=dokploy_default"
+      - "traefik.http.routers.review-room-web.rule=Host(`review-room.theosirislabs.com`)"
+      - "traefik.http.routers.review-room-web.entrypoints=web"
+      - "traefik.http.routers.review-room-web.middlewares=redirect-to-https@file"
+      - "traefik.http.routers.review-room-websecure.rule=Host(`review-room.theosirislabs.com`)"
+      - "traefik.http.routers.review-room-websecure.entrypoints=websecure"
+      - "traefik.http.routers.review-room-websecure.tls=true"
+      - "traefik.http.routers.review-room-websecure.tls.certresolver=letsencrypt"
+      - "traefik.http.services.review-room.loadbalancer.server.port=3000"
+      - "traefik.http.services.review-room.loadbalancer.serversTransport=longUploadTransport@file"
+
+networks:
+  dokploy_default:
+    external: true
