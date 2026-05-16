@@ -192,8 +192,8 @@ const verifyPassword = (password: string, hash: string) => {
 };
 
 // ── Seed Agency Users (auth accounts) ─────────────────────────
-const defaultAdminUsername = "youssef@theosirislabs.com";
-const defaultAdminPassword = "osiris2026";
+const defaultAdminUsername = "admin@reviewroom.local";
+const defaultAdminPassword = "demo2026";
 const existingAdmin = db.prepare("SELECT id FROM agency_users WHERE username = ?").get(defaultAdminUsername);
 if (!existingAdmin) {
   db.prepare("INSERT INTO agency_users (id, username, passwordHash, role, createdAt) VALUES (?,?,?,?,?)")
