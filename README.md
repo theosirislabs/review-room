@@ -2,8 +2,11 @@
 
 A dual-lens social media content review engine for agencies and clients. Built with React, Vite, Express, Socket.io, and SQLite.
 
-![Dashboard](screenshots/dashboard-thumb.png)
-*Osiris Command Center — agency dashboard with client workspace cards and live activity feed*
+![Agency View](screenshots/agency-view.png)
+*Agency Review Room — content grid for Fahmy Properties with filtering, bulk upload, and real-time status*
+
+![Client Portal](screenshots/client-view.png)
+*Client Review Portal — simplified approval interface for Fahmy Properties showing 17/20 reviewed*
 
 ## Features
 
