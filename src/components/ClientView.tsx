@@ -75,7 +75,7 @@ function MediaViewer({ urls, format, thumbnailUrl: _thumbnailUrl }: { urls: stri
 
   return (
     <div
-      className="relative bg-black select-none min-h-[300px] flex items-center justify-center overflow-hidden"
+      className="relative bg-black select-none flex items-center justify-center overflow-hidden"
       onTouchStart={onTouchStart}
       onTouchEnd={onTouchEnd}
     >
