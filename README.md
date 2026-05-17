@@ -41,7 +41,7 @@ Agencies create. Clients approve. Both see the same thing at the same time.
 
 ## Made for agencies
 
-We built this because we ran one. OSIRIS LABS manages 23+ clients across real estate, fintech, healthcare, and entertainment. The Review Room is what we use internally — and what our clients log into every day.
+We built this because we ran one. The Review Room is what we use internally — and what our clients log into every day.
 
 It's not a SaaS upsell. It's not a startup pitch. It's a tool we built to solve a real problem, and it's open source so anyone can do the same.
 
