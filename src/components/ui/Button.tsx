@@ -21,7 +21,7 @@ export function Button({ variant = "primary", size = "md", children, icon, class
         secondary: "bg-white border border-zinc-200 text-zinc-700 hover:bg-zinc-50 hover:border-zinc-300",
         danger: "bg-red-50 hover:bg-red-100 text-red-600 border border-red-200",
         ghost: "bg-transparent hover:bg-zinc-100 text-zinc-600",
-        outline: "bg-transparent border-2 border-dashed border-zinc-200 hover:border-indigo-400 hover:text-indigo-600 text-zinc-500"
+        outline: "bg-transparent border-2 border-solid border-zinc-200 hover:border-indigo-400 hover:text-indigo-600 text-zinc-500"
     };
 
     return (

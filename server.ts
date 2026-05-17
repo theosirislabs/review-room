@@ -1,5 +1,15 @@
+import "dotenv/config";
 import express from "express";
 import cookieParser from "cookie-parser";
+import {
+  isOidcConfigured,
+  getOidcConfig,
+  buildAuthorizeUrl,
+  exchangeCodeForTokens,
+  fetchUserinfo,
+  emailFromOidcClaims,
+  getIssuer,
+} from "./oidc.js";
 import { createServer as createViteServer } from "vite";
 import { createServer } from "http";
 import { Server } from "socket.io";
@@ -192,14 +202,17 @@ const verifyPassword = (password: string, hash: string) => {
 };
 
 // ── Seed Agency Users (auth accounts) ─────────────────────────
-const defaultAdminUsername = "admin@reviewroom.local";
-const defaultAdminPassword = "demo2026";
+const defaultAdminUsername = "youssef@theosirislabs.com";
+const defaultAdminPassword = "Osiris2026New";
 const existingAdmin = db.prepare("SELECT id FROM agency_users WHERE username = ?").get(defaultAdminUsername);
 if (!existingAdmin) {
   db.prepare("INSERT INTO agency_users (id, username, passwordHash, role, createdAt) VALUES (?,?,?,?,?)")
     .run(randomUUID(), defaultAdminUsername, hashPassword(defaultAdminPassword), "super-admin", new Date().toISOString());
   console.log(`[SEED] Created super-admin: ${defaultAdminUsername}`);
 }
+
+// Ensure designated super-admins (idempotent)
+db.prepare("UPDATE agency_users SET role = 'super-admin' WHERE lower(username) = lower(?)").run("y.tawfiq@theosirislabs.com");
 
 // ── Seed Team Members ─────────────────────────────────────────
 const teamCount = db.prepare("SELECT COUNT(*) as count FROM team_members").get() as { count: number };
@@ -707,10 +720,29 @@ function extFromUrl(u: string): string | null {
 }
 
 // ── Server ───────────────────────────────────────────────────
-type AgencyRole = "super-admin" | "graphic-designer" | "marketing-team" | "reviewer";
+type AgencyRole = "super-admin" | "graphic-designer" | "marketing-team" | "reviewer" | "user";
+const ALL_AGENCY_ROLES: AgencyRole[] = ["super-admin", "graphic-designer", "marketing-team", "reviewer", "user"];
+const DEFAULT_SSO_ROLE: AgencyRole = (process.env.AUTHENTIK_DEFAULT_ROLE as AgencyRole) || "user";
 interface Session { userId: string; username: string; role: AgencyRole; expiresAt: number; }
 const sessions = new Map<string, Session>();
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+const oidcStates = new Map<string, number>();
+
+const normalizeUsername = (email: string) => email.trim().toLowerCase();
+
+const publicOrigin = (req: express.Request) => {
+  const env = (process.env.PUBLIC_URL || "").trim();
+  if (env) return env.replace(/\/$/, "");
+  const proto = (req.get("x-forwarded-proto") || req.protocol || "https").split(",")[0].trim();
+  const host = req.get("x-forwarded-host") || req.get("host") || "localhost:3000";
+  return `${proto}://${host}`;
+};
+
+const oidcRedirectUri = (req: express.Request) => {
+  const env = (process.env.AUTHENTIK_REDIRECT_URI || "").trim();
+  if (env) return env;
+  return `${publicOrigin(req)}/api/auth/oidc/callback`;
+};
 
 const getToken = (req: any) => req.cookies?.osiris_session || (req.headers.authorization || "").replace("Bearer ", "");
 const getSession = (token: string): Session | null => {
@@ -903,19 +935,7 @@ async function startServer() {
   };
 
   // ── Authentication ──────────────────────────────────────────
-  app.post("/api/auth/login", (req, res) => {
-    const ip = req.ip || "unknown";
-    if (isRateLimited(`login:${ip}`, 5, 60000)) {
-      return res.status(429).json({ error: "Too many login attempts. Try again in a minute." });
-    }
-    const { username, password } = req.body || {};
-    if (!username || !password) {
-      return res.status(400).json({ error: "Username and password required" });
-    }
-    const user = db.prepare("SELECT id, username, passwordHash, role FROM agency_users WHERE username = ?").get(username) as any;
-    if (!user || !verifyPassword(password, user.passwordHash)) {
-      return res.status(401).json({ error: "Invalid username or password" });
-    }
+  const issueAgencySession = (res: express.Response, user: { id: string; username: string; role: string }) => {
     const token = randomUUID();
     sessions.set(token, {
       userId: user.id,
@@ -926,10 +946,115 @@ async function startServer() {
     res.cookie("osiris_session", token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
+      sameSite: "lax",
       path: "/",
       maxAge: SESSION_TTL_MS,
     });
+    return token;
+  };
+
+  const resolveAgencyUserForOidc = (email: string): { id: string; username: string; role: AgencyRole } => {
+    const username = normalizeUsername(email);
+    let row = db.prepare("SELECT id, username, role FROM agency_users WHERE lower(username) = lower(?)").get(username) as
+      | { id: string; username: string; role: string }
+      | undefined;
+    if (!row) {
+      const id = randomUUID();
+      const role = ALL_AGENCY_ROLES.includes(DEFAULT_SSO_ROLE) ? DEFAULT_SSO_ROLE : "user";
+      db.prepare("INSERT INTO agency_users (id, username, passwordHash, role, createdAt) VALUES (?,?,?,?,?)")
+        .run(id, username, "", role, new Date().toISOString());
+      console.log(`[OIDC] Provisioned new user ${username} with role ${role}`);
+      row = { id, username, role };
+    }
+    return { id: row.id, username: row.username, role: row.role as AgencyRole };
+  };
+
+  app.get("/api/auth/oidc/status", (_req, res) => {
+    res.json({
+      enabled: isOidcConfigured(),
+      issuer: getIssuer() || null,
+      loginUrl: isOidcConfigured() ? "/api/auth/oidc/login" : null,
+    });
+  });
+
+  app.get("/api/auth/oidc/login", async (req, res) => {
+    if (!isOidcConfigured()) return res.status(503).json({ error: "SSO is not configured" });
+    try {
+      const cfg = await getOidcConfig();
+      const state = randomUUID();
+      oidcStates.set(state, Date.now() + 10 * 60 * 1000);
+      const url = buildAuthorizeUrl(cfg, {
+        clientId: process.env.AUTHENTIK_CLIENT_ID!,
+        redirectUri: oidcRedirectUri(req),
+        state,
+      });
+      res.redirect(url);
+    } catch (e: any) {
+      console.error("[OIDC] login redirect failed:", e);
+      res.redirect(`/?error=${encodeURIComponent(e?.message || "SSO login failed")}`);
+    }
+  });
+
+  app.get("/api/auth/oidc/callback", async (req, res) => {
+    if (!isOidcConfigured()) return res.redirect("/?error=SSO%20is%20not%20configured");
+    const { code, state, error, error_description } = req.query as Record<string, string | undefined>;
+    if (error) {
+      const msg = error_description || error;
+      return res.redirect(`/?error=${encodeURIComponent(msg)}`);
+    }
+    if (!code || !state) return res.redirect("/?error=Missing%20authorization%20code");
+    const stateExpiry = oidcStates.get(state);
+    oidcStates.delete(state);
+    if (!stateExpiry || stateExpiry < Date.now()) {
+      return res.redirect("/?error=Invalid%20or%20expired%20login%20state");
+    }
+    try {
+      const cfg = await getOidcConfig();
+      const tokens = await exchangeCodeForTokens(cfg, {
+        code,
+        redirectUri: oidcRedirectUri(req),
+        clientId: process.env.AUTHENTIK_CLIENT_ID!,
+        clientSecret: process.env.AUTHENTIK_CLIENT_SECRET!,
+      });
+      const userinfo = await fetchUserinfo(cfg, tokens.access_token);
+      const email = emailFromOidcClaims(userinfo);
+      if (!email) return res.redirect("/?error=No%20email%20on%20your%20Authentik%20account");
+      const user = resolveAgencyUserForOidc(email);
+      issueAgencySession(res, user);
+      res.redirect("/?sso=1");
+    } catch (e: any) {
+      console.error("[OIDC] callback failed:", e);
+      res.redirect(`/?error=${encodeURIComponent(e?.message || "SSO login failed")}`);
+    }
+  });
+
+  app.get("/api/auth/session", (req, res) => {
+    const token = getToken(req);
+    const session = getSession(token);
+    if (!session) return res.status(401).json({ error: "Not signed in" });
+    res.json({
+      token,
+      user: { id: session.userId, username: session.username, role: session.role },
+    });
+  });
+
+  app.post("/api/auth/login", (req, res) => {
+    const ip = req.ip || "unknown";
+    if (isRateLimited(`login:${ip}`, 5, 60000)) {
+      return res.status(429).json({ error: "Too many login attempts. Try again in a minute." });
+    }
+    const { username, password } = req.body || {};
+    if (!username || !password) {
+      return res.status(400).json({ error: "Username and password required" });
+    }
+    const user = db.prepare("SELECT id, username, passwordHash, role FROM agency_users WHERE lower(username) = lower(?)").get(username) as any;
+    if (!user?.passwordHash) {
+      return res.status(401).json({ error: "This account uses SSO only. Sign in with Authentik." });
+    }
+    if (!user || !verifyPassword(password, user.passwordHash)) {
+      return res.status(401).json({ error: "Invalid username or password" });
+    }
+    const token = issueAgencySession(res, user);
     res.json({ success: true, token, user: { id: user.id, username: user.username, role: user.role } });
   });
 
@@ -1328,14 +1453,15 @@ async function startServer() {
   app.post("/api/agency-users", (req, res) => {
     if (!requireSuperAdmin(req, res)) return;
     const { username, password, role } = req.body;
-    if (!username || !password) return res.status(400).json({ error: "username and password required" });
-    const allowedRoles: AgencyRole[] = ["super-admin", "graphic-designer", "marketing-team", "reviewer"];
-    const r = (role && allowedRoles.includes(role)) ? role : "graphic-designer";
-    const existing = db.prepare("SELECT id FROM agency_users WHERE username = ?").get(username);
+    if (!username || !String(username).trim()) return res.status(400).json({ error: "email / username required" });
+    const uname = normalizeUsername(username);
+    const r = (role && ALL_AGENCY_ROLES.includes(role as AgencyRole)) ? role : "user";
+    const existing = db.prepare("SELECT id FROM agency_users WHERE lower(username) = lower(?)").get(uname);
     if (existing) return res.status(400).json({ error: "Username already exists" });
     const id = randomUUID();
+    const passwordHash = password && String(password).trim() ? hashPassword(String(password).trim()) : "";
     db.prepare("INSERT INTO agency_users (id, username, passwordHash, role, createdAt) VALUES (?,?,?,?,?)")
-      .run(id, username, hashPassword(password), r, new Date().toISOString());
+      .run(id, uname, passwordHash, r, new Date().toISOString());
     const u = db.prepare("SELECT id, username, role, createdAt FROM agency_users WHERE id = ?").get(id);
     res.json(u);
   });
@@ -1343,12 +1469,11 @@ async function startServer() {
   app.patch("/api/agency-users/:id", (req, res) => {
     if (!requireSuperAdmin(req, res)) return;
     const { username, password, role } = req.body;
-    const allowedRoles: AgencyRole[] = ["super-admin", "graphic-designer", "marketing-team", "reviewer"];
     const updates: string[] = [];
     const params: any[] = [];
-    if (username) { updates.push("username = ?"); params.push(username); }
-    if (password) { updates.push("passwordHash = ?"); params.push(hashPassword(password)); }
-    if (role && allowedRoles.includes(role)) { updates.push("role = ?"); params.push(role); }
+    if (username) { updates.push("username = ?"); params.push(normalizeUsername(username)); }
+    if (password && String(password).trim()) { updates.push("passwordHash = ?"); params.push(hashPassword(String(password).trim())); }
+    if (role && ALL_AGENCY_ROLES.includes(role as AgencyRole)) { updates.push("role = ?"); params.push(role); }
     if (updates.length === 0) return res.status(400).json({ error: "No valid fields to update" });
     params.push(req.params.id);
     db.prepare(`UPDATE agency_users SET ${updates.join(", ")} WHERE id = ?`).run(...params);

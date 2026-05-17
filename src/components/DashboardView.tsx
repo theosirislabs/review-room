@@ -111,6 +111,14 @@ export default function DashboardView({
     const [username, setUsername] = useState("");
     const [password, setPassword] = useState("");
     const [loginLoading, setLoginLoading] = useState(false);
+    const [oidcEnabled, setOidcEnabled] = useState(false);
+
+    useEffect(() => {
+        fetch("/api/auth/oidc/status")
+            .then((r) => r.json())
+            .then((d: { enabled?: boolean }) => setOidcEnabled(!!d.enabled))
+            .catch(() => setOidcEnabled(false));
+    }, []);
 
     if (!adminToken) {
         return (
@@ -199,6 +207,15 @@ export default function DashboardView({
                                     </>
                                 )}
                             </button>
+                            {oidcEnabled && (
+                                <a
+                                    href="/api/auth/oidc/login"
+                                    className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-500 border border-indigo-500/50 transition-all"
+                                >
+                                    <Shield className="w-4 h-4" />
+                                    Sign in with Authentik
+                                </a>
+                            )}
                             <div className="flex justify-center">
                                 <button
                                     type="button"

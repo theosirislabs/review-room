@@ -104,6 +104,35 @@ function AppContent() {
 
   useEffect(() => { setLoaded(false); }, [tenantId, reviewShareToken]);
 
+  // Authentik SSO callback: cookie session → localStorage token
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const err = params.get("error");
+    if (err) {
+      toastError(decodeURIComponent(err.replace(/\+/g, " ")));
+      navigate(location.pathname || "/", { replace: true });
+      return;
+    }
+    if (params.get("sso") !== "1") return;
+    fetch("/api/auth/session", { credentials: "include" })
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error("No session"))))
+      .then((data: { token?: string; user?: { id: string; username: string; role: string } }) => {
+        if (!data?.token) throw new Error("No session");
+        setAdminToken(data.token);
+        localStorage.setItem("osiris_admin_token", data.token);
+        if (data.user) {
+          setCurrentUser(data.user);
+          localStorage.setItem("osiris_user", JSON.stringify(data.user));
+        }
+        success("Signed in with Authentik");
+        navigate("/", { replace: true });
+      })
+      .catch(() => {
+        toastError("Could not complete Authentik sign-in");
+        navigate("/", { replace: true });
+      });
+  }, [location.search, location.pathname, navigate, success, toastError]);
+
   // Validate session and fetch user when we have a token
   useEffect(() => {
     if (!adminToken) {

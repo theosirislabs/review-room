@@ -9,6 +9,7 @@ const ROLE_LABELS: Record<string, { label: string; color: string }> = {
   "graphic-designer": { label: "Graphic Designer", color: "bg-emerald-100 text-emerald-700" },
   "marketing-team": { label: "Marketing Team", color: "bg-purple-100 text-purple-700" },
   reviewer: { label: "Reviewer", color: "bg-amber-100 text-amber-700" },
+  user: { label: "User (default)", color: "bg-zinc-100 text-zinc-600" },
 };
 
 interface AgencyUser {
@@ -30,7 +31,7 @@ export default function UserManagementModal({ isOpen, onClose, adminToken, onRef
   const [users, setUsers] = useState<AgencyUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
-  const [form, setForm] = useState({ username: "", password: "", role: "graphic-designer" });
+  const [form, setForm] = useState({ username: "", password: "", role: "user" });
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editRole, setEditRole] = useState<string>("graphic-designer");
@@ -49,7 +50,7 @@ export default function UserManagementModal({ isOpen, onClose, adminToken, onRef
   }, [isOpen, adminToken]);
 
   const saveNew = async () => {
-    if (!form.username.trim() || !form.password.trim()) return toastError("Username and password are required");
+    if (!form.username.trim()) return toastError("Email / username is required");
     setSaving(true);
     try {
       const res = await fetch("/api/agency-users", {
@@ -60,7 +61,7 @@ export default function UserManagementModal({ isOpen, onClose, adminToken, onRef
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Failed to add user");
       success(`${form.username} added`);
-      setForm({ username: "", password: "", role: "graphic-designer" });
+      setForm({ username: "", password: "", role: "user" });
       setAdding(false);
       setUsers((prev) => [...prev, data]);
       onRefresh?.();
@@ -150,6 +151,7 @@ export default function UserManagementModal({ isOpen, onClose, adminToken, onRef
                         <option value="graphic-designer">Graphic Designer</option>
                         <option value="marketing-team">Marketing Team</option>
                         <option value="reviewer">Reviewer</option>
+                        <option value="user">User (default)</option>
                       </select>
                       <input
                         type="password"
@@ -180,13 +182,14 @@ export default function UserManagementModal({ isOpen, onClose, adminToken, onRef
             {adding ? (
               <div className="p-5 bg-indigo-50 rounded-2xl border border-indigo-100 space-y-3">
                 <h3 className="text-xs font-black uppercase tracking-widest text-indigo-700">Add User</h3>
-                <input className="w-full px-3 py-2.5 bg-white border border-indigo-200 rounded-xl text-sm text-zinc-900 placeholder:text-zinc-400 focus:ring-2 focus:ring-indigo-400 outline-none" placeholder="Username *" value={form.username} onChange={(e) => setForm((p) => ({ ...p, username: e.target.value }))} />
-                <input className="w-full px-3 py-2.5 bg-white border border-indigo-200 rounded-xl text-sm text-zinc-900 placeholder:text-zinc-400 focus:ring-2 focus:ring-indigo-400 outline-none" placeholder="Password *" type="password" value={form.password} onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))} />
+                <input className="w-full px-3 py-2.5 bg-white border border-indigo-200 rounded-xl text-sm text-zinc-900 placeholder:text-zinc-400 focus:ring-2 focus:ring-indigo-400 outline-none" placeholder="Email (for SSO) *" value={form.username} onChange={(e) => setForm((p) => ({ ...p, username: e.target.value }))} />
+                <input className="w-full px-3 py-2.5 bg-white border border-indigo-200 rounded-xl text-sm text-zinc-900 placeholder:text-zinc-400 focus:ring-2 focus:ring-indigo-400 outline-none" placeholder="Password (optional — leave blank for SSO only)" type="password" value={form.password} onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))} />
                 <select className="w-full px-3 py-2.5 bg-white border border-indigo-200 rounded-xl text-sm text-zinc-900 focus:ring-2 focus:ring-indigo-400 outline-none" value={form.role} onChange={(e) => setForm((p) => ({ ...p, role: e.target.value }))}>
                   <option value="super-admin">Super Admin</option>
                   <option value="graphic-designer">Graphic Designer</option>
                   <option value="marketing-team">Marketing Team</option>
                   <option value="reviewer">Reviewer</option>
+                  <option value="user">User (default)</option>
                 </select>
                 <div className="flex gap-2">
                   <button onClick={() => setAdding(false)} className="flex-1 py-2.5 text-sm font-bold text-zinc-500 hover:bg-zinc-100 rounded-xl transition-colors">Cancel</button>
@@ -204,7 +207,7 @@ export default function UserManagementModal({ isOpen, onClose, adminToken, onRef
 
           <div className="px-6 py-4 border-t border-zinc-100 flex items-center gap-2 text-xs text-zinc-400">
             <Shield className="w-3.5 h-3.5" />
-            <span>Super Admin: full access · Graphic Designer: create/edit content · Marketing: schedule/post · Reviewer: QA & approve</span>
+            <span>Pre-add emails before SSO, or users auto-join as User on first Authentik login. Super Admin manages roles.</span>
           </div>
         </motion.div>
       </motion.div>
