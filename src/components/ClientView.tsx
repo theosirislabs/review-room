@@ -75,7 +75,7 @@ function MediaViewer({ urls, format, thumbnailUrl: _thumbnailUrl }: { urls: stri
 
   return (
     <div
-      className="relative bg-black select-none flex items-center justify-center overflow-hidden"
+      className="relative select-none flex items-center justify-center overflow-hidden"
       onTouchStart={onTouchStart}
       onTouchEnd={onTouchEnd}
     >
@@ -821,8 +821,10 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
 
               <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
                 {/* ── Left: Media (true aspect ratio) ─────── */}
-                <div className="md:w-[55%] bg-black shrink-0 relative">
-                  <MediaViewer urls={activePost.mediaUrls} format={activePost.format} thumbnailUrl={activePost.thumbnailUrl} />
+                <div className="md:w-[55%] bg-zinc-900 flex flex-col relative self-stretch">
+                  <div className="flex-1 flex items-center justify-center bg-zinc-900">
+                    <MediaViewer urls={activePost.mediaUrls} format={activePost.format} thumbnailUrl={activePost.thumbnailUrl} />
+                    </div>
 
                   {/* Post‑level prev/next (navigate between posts) */}
                   <div className="absolute bottom-3 left-3 flex gap-2">
