@@ -527,7 +527,7 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
 
   // ── Render ─────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-[#fafafa] font-sans text-zinc-900 antialiased">
+    <div className="min-h-screen bg-zinc-50 font-sans text-zinc-900 antialiased">
 
       {/* ── Header ─────────────────────────────────────────── */}
       <header className="sticky top-0 z-40 bg-white/80 backdrop-blur-lg border-b border-zinc-200 relative">
