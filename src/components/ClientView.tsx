@@ -336,6 +336,27 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
   };
   const [sendingComment, setSendingComment] = useState(false);
   const [summaryOpen, setSummaryOpen] = useState(false);
+
+  // On mount, check all posts: if post has client comments and isn't approved, mark as Changes Requested
+  useEffect(() => {
+    let changed = false;
+    const updated = posts.map(p => {
+      const hasFeedback = p.clientComments && p.clientComments.some(c => !c.isInternalOnly);
+      if (hasFeedback && p.clientStatus !== "Changes Requested" && p.clientStatus !== "Approved") {
+        changed = true;
+        return { ...p, clientStatus: "Changes Requested", internalStatus: "Changes Requested" };
+      }
+      return p;
+    });
+    if (changed) {
+      // Update each post that needs it
+      updated.forEach((p, i) => {
+        if (p.clientStatus === "Changes Requested" && posts[i]?.clientStatus !== "Changes Requested") {
+          onUpdatePost(p);
+        }
+      });
+    }
+  }, []);
   const commentRef = useRef<HTMLInputElement>(null);
   const summaryRef = useRef<HTMLDivElement>(null);
   const modalTouchX = useRef<number | null>(null);
@@ -436,9 +457,21 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
     if (!wasAlready) success("Post approved ✓");
   };
 
+  const handleDisapprove = () => {
+    if (!activePost) return;
+    onUpdatePost({ ...activePost, clientStatus: "Changes Requested", internalStatus: "Changes Requested" });
+    onAddComment(activePost.id, {
+      author: "Client",
+      text: "Disapproved — needs revision",
+      isInternalOnly: false,
+      timestamp: new Date().toISOString(),
+      changeType: "Other",
+      priority: "high",
+    });
+    success("Post disapproved — agency notified");
+  };
   const handleRevertApproval = () => {
     if (!activePost) return;
-const handleDisapprove = () => {    if (!activePost) return;    onUpdatePost({ ...activePost, clientStatus: "Changes Requested", internalStatus: "Changes Requested" });    onAddComment(activePost.id, {      author: "Client",      text: "Disapproved — needs revision",      isInternalOnly: false,      timestamp: new Date().toISOString(),      changeType: "Other",      priority: "high",    });    success("Post disapproved — agency notified");  };
     onUpdatePost({ ...activePost, clientStatus: "Needs Your Review", internalStatus: "Ready for Client" });
     success("Status reverted to Needs Your Review");
   };
