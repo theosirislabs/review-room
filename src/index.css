@@ -190,3 +190,47 @@ select {
 [data-theme="light"] .text-zinc-500 {
   color: #52525b;
 }
+
+/* ── Light mode: critical text contrast fix ────────────────── */
+/* text-zinc-900 and text-zinc-800 become white in light mode from the
+   zinc inversion — these are the most common text colors on white cards.
+   Override to ensure they stay readable. */
+[data-theme=light] .text-zinc-900 {
+  color: #18181b;
+}
+[data-theme=light] .text-zinc-800 {
+  color: #27272a;
+}
+
+/* Light mode: accent surface backgrounds — bg-zinc-50/100 become
+   near-black in light mode without overrides */
+[data-theme=light] .bg-zinc-50 {
+  background-color: #fafafa;
+}
+[data-theme=light] .bg-zinc-100 {
+  background-color: #f4f4f5;
+}
+[data-theme=light] .hover\:bg-zinc-50:hover {
+  background-color: #fafafa;
+}
+[data-theme=light] .hover\:bg-zinc-100:hover {
+  background-color: #f4f4f5;
+}
+
+/* Light mode: border-zinc-100 becomes too dark — override to light gray */
+[data-theme=light] .border-zinc-100 {
+  border-color: #e4e4e7;
+}
+
+/* Light mode: ring colors for focus states */
+[data-theme=light] .ring-zinc-900 {
+  --tw-ring-color: #18181b;
+}
+
+/* Light mode: divide colors */
+[data-theme=light] .divide-zinc-100 > * + * {
+  border-color: #e4e4e7;
+}
+[data-theme=light] .divide-zinc-200 > * + * {
+  border-color: #d4d4d8;
+}

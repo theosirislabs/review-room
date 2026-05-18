@@ -148,6 +148,7 @@ runMigration("SELECT changeType FROM comments LIMIT 1", "ALTER TABLE comments AD
 runMigration("SELECT priority FROM comments LIMIT 1", "ALTER TABLE comments ADD COLUMN priority TEXT", "Adding 'priority' to comments");
 runMigration("SELECT slideIndex FROM comments LIMIT 1", "ALTER TABLE comments ADD COLUMN slideIndex INTEGER", "Adding 'slideIndex' to comments");
 runMigration("SELECT thumbnailUrl FROM posts LIMIT 1", "ALTER TABLE posts ADD COLUMN thumbnailUrl TEXT", "Adding 'thumbnailUrl' to posts");
+runMigration("SELECT script FROM posts LIMIT 1", "ALTER TABLE posts ADD COLUMN script TEXT", "Adding script to posts");
 try {
   db.prepare("SELECT 1 FROM agency_users LIMIT 1").get();
 } catch (e: any) {

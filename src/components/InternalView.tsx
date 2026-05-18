@@ -54,6 +54,7 @@ const STATUS_COLORS: Record<string, string> = {
   "Ready for Client": "bg-indigo-50 text-indigo-700 border-indigo-200",
   "Changes Requested": "bg-red-50 text-red-700 border-red-200",
   Approved: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  "Ready to Schedule": "bg-purple-50 text-purple-700 border-purple-200",
   Scheduled: "bg-purple-50 text-purple-700 border-purple-200",
   Posted: "bg-zinc-900 text-white border-zinc-800",
 };
@@ -65,13 +66,13 @@ const canCreateEdit = (role: string) => ["super-admin", "graphic-designer"].incl
 const canSchedulePost = (role: string) => ["super-admin", "marketing-team"].includes(role);
 const canReview = (role: string) => ["super-admin", "reviewer"].includes(role);
 
-const ALL_STATUSES: InternalStatus[] = ["Concept", "Draft", "Internal QA", "Ready for Client", "Changes Requested", "Approved", "Scheduled", "Posted"];
+const ALL_STATUSES: InternalStatus[] = ["Concept", "Draft", "Internal QA", "Ready for Client", "Changes Requested", "Approved", "Ready to Schedule", "Scheduled", "Posted"];
 const getAllowedStatuses = (role: string): InternalStatus[] => {
   if (role === "super-admin") return ALL_STATUSES;
   const allowed: InternalStatus[] = [];
   if (canCreateEdit(role)) allowed.push("Concept", "Draft", "Changes Requested");
   if (canReview(role)) allowed.push("Internal QA", "Ready for Client", "Approved");
-  if (canSchedulePost(role)) allowed.push("Scheduled", "Posted");
+  if (canSchedulePost(role)) allowed.push("Ready to Schedule", "Scheduled", "Posted");
   return [...new Set(allowed)];
 };
 

@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from "motion/react";
 import {
   ChevronLeft, ChevronRight, Copy, Grid3X3,
   Play, Send, X, CalendarDays, Clock, CheckCheck,
-  AlertCircle, Loader2, ImageOff, MessageSquare, Share2,
+  AlertCircle, Loader2, ImageOff, MessageSquare, Share2, FileText,
   Sun, Moon
 } from "lucide-react";
 import { useToast } from "./Toast";
@@ -34,6 +34,7 @@ import { useTheme } from "../theme";
 function PostStatusBadge({ status }: { status: Post["clientStatus"] }) {
   const cfg = {
     "Not Ready for Client": "bg-zinc-500/15 text-zinc-300 border-zinc-500/25",
+    "Ready to Schedule": "bg-purple-500/15 text-purple-300 border-purple-500/25",
     "Approved": "bg-emerald-500/15 text-emerald-300 border-emerald-500/25",
     "Changes Requested": "bg-amber-500/15 text-amber-300 border-amber-500/25",
     "Needs Your Review": "bg-white/10 text-white/70 border-white/15",
@@ -74,7 +75,7 @@ function MediaViewer({ urls, format, thumbnailUrl: _thumbnailUrl }: { urls: stri
 
   return (
     <div
-      className="relative bg-black select-none min-h-[300px] flex items-center justify-center overflow-hidden"
+      className="relative select-none flex items-center justify-center overflow-hidden"
       onTouchStart={onTouchStart}
       onTouchEnd={onTouchEnd}
     >
@@ -335,12 +336,33 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
   };
   const [sendingComment, setSendingComment] = useState(false);
   const [summaryOpen, setSummaryOpen] = useState(false);
+
+  // On mount, check all posts: if post has client comments and isn't approved, mark as Changes Requested
+  useEffect(() => {
+    let changed = false;
+    const updated = posts.map(p => {
+      const hasFeedback = p.clientComments && p.clientComments.some(c => !c.isInternalOnly);
+      if (hasFeedback && p.clientStatus !== "Changes Requested" && p.clientStatus !== "Approved") {
+        changed = true;
+        return { ...p, clientStatus: "Changes Requested", internalStatus: "Changes Requested" };
+      }
+      return p;
+    });
+    if (changed) {
+      // Update each post that needs it
+      updated.forEach((p, i) => {
+        if (p.clientStatus === "Changes Requested" && posts[i]?.clientStatus !== "Changes Requested") {
+          onUpdatePost(p);
+        }
+      });
+    }
+  }, []);
   const commentRef = useRef<HTMLInputElement>(null);
   const summaryRef = useRef<HTMLDivElement>(null);
   const modalTouchX = useRef<number | null>(null);
 
   const [requestModalOpen, setRequestModalOpen] = useState(false);
-  const [reqChangeType, setReqChangeType] = useState("copy");
+  const [reqChangeType, setReqChangeType] = useState("Content");
   const [reqPriority, setReqPriority] = useState<"low" | "medium" | "high">("medium");
   const [reqSlideIndex, setReqSlideIndex] = useState<number | "">("");
   const [reqText, setReqText] = useState("");
@@ -398,6 +420,9 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
   // Keyboard nav
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      const tagName = target.tagName.toLowerCase();
+      if (tagName === "input" || tagName === "textarea" || target.isContentEditable) return;
       if (activePostId !== null) {
         if (e.key === "ArrowLeft" && activePostIdx > 0) setActivePostId(sortedPosts[activePostIdx - 1].id);
         if (e.key === "ArrowRight" && activePostIdx < sortedPosts.length - 1) setActivePostId(sortedPosts[activePostIdx + 1].id);
@@ -417,6 +442,10 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
       isInternalOnly: false,
       timestamp: new Date().toISOString(),
     });
+    // Auto-update status when client comments
+    if (activePost.clientStatus !== "Changes Requested" && activePost.clientStatus !== "Approved") {
+      onUpdatePost({ ...activePost, clientStatus: "Changes Requested", internalStatus: "Changes Requested" });
+    }
     setCommentText("");
     setSendingComment(false);
   };
@@ -428,6 +457,19 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
     if (!wasAlready) success("Post approved ✓");
   };
 
+  const handleDisapprove = () => {
+    if (!activePost) return;
+    onUpdatePost({ ...activePost, clientStatus: "Changes Requested", internalStatus: "Changes Requested" });
+    onAddComment(activePost.id, {
+      author: "Client",
+      text: "Disapproved — needs revision",
+      isInternalOnly: false,
+      timestamp: new Date().toISOString(),
+      changeType: "Other",
+      priority: "high",
+    });
+    success("Post disapproved — agency notified");
+  };
   const handleRevertApproval = () => {
     if (!activePost) return;
     onUpdatePost({ ...activePost, clientStatus: "Needs Your Review", internalStatus: "Ready for Client" });
@@ -463,7 +505,7 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
     // Reset forms
     setRequestModalOpen(false);
     setReqText("");
-    setReqChangeType("copy");
+    setReqChangeType("Content");
     setReqPriority("medium");
     setReqSlideIndex("");
     setSendingComment(false);
@@ -485,7 +527,7 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
 
   // ── Render ─────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-[#fafafa] font-sans text-zinc-900 antialiased">
+    <div className="min-h-screen bg-zinc-50 font-sans text-zinc-900 antialiased">
 
       {/* ── Header ─────────────────────────────────────────── */}
       <header className="sticky top-0 z-40 bg-white/80 backdrop-blur-lg border-b border-zinc-200 relative">
@@ -779,8 +821,10 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
 
               <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
                 {/* ── Left: Media (true aspect ratio) ─────── */}
-                <div className="md:w-[55%] bg-black shrink-0 relative">
-                  <MediaViewer urls={activePost.mediaUrls} format={activePost.format} thumbnailUrl={activePost.thumbnailUrl} />
+                <div className="md:w-[55%] bg-zinc-900 flex flex-col relative self-stretch">
+                  <div className="flex-1 flex items-center justify-center bg-zinc-900">
+                    <MediaViewer urls={activePost.mediaUrls} format={activePost.format} thumbnailUrl={activePost.thumbnailUrl} />
+                    </div>
 
                   {/* Post‑level prev/next (navigate between posts) */}
                   <div className="absolute bottom-3 left-3 flex gap-2">
@@ -869,6 +913,16 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
 
                     {/* Caption */}
                     <div className="p-4 border-b border-zinc-100">
+                      {activePost.script && activePost.script.length > 0 && (
+                        <div className="mb-3 p-3 bg-indigo-50 border border-indigo-100 rounded-xl">
+                          <p className="text-[10px] font-bold uppercase tracking-widest text-indigo-500 mb-1.5 flex items-center gap-1">
+                            <FileText className="w-3 h-3" /> Script
+                          </p>
+                          <p className="text-sm text-indigo-900 whitespace-pre-wrap leading-relaxed">
+                            {activePost.script}
+                          </p>
+                        </div>
+                      )}
                       <p className="text-sm text-zinc-800 whitespace-pre-wrap leading-relaxed">
                         <span className="font-semibold mr-2">{tenantId}</span>
                         {activePost.caption}
@@ -942,7 +996,7 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
                   {/* ── Action footer ──────────────────────── */}
                   <div className="p-4 border-t border-zinc-100 bg-zinc-50/80 space-y-3 shrink-0">
                     {/* Approve / Request Changes / Revert */}
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-3 gap-2">
                       <button
                         onClick={handleApprove}
                         className={`py-2.5 rounded-xl text-sm font-semibold transition-all ${activePost.clientStatus === "Approved"
@@ -953,6 +1007,12 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
                         {activePost.clientStatus === "Approved" ? (
                           <span className="flex items-center justify-center gap-1.5"><CheckCheck className="w-4 h-4" /> Approved</span>
                         ) : "Approve"}
+                      </button>
+                      <button
+                        onClick={handleDisapprove}
+                        className="py-2.5 rounded-xl text-sm font-semibold transition-all bg-white border border-zinc-200 text-red-600 hover:bg-red-50 hover:border-red-300 hover:text-red-700"
+                      >
+                        Disapprove
                       </button>
                       <button
                         onClick={handleRequestChanges}
@@ -1028,8 +1088,8 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
                         {/* Change Type */}
                         <div>
                           <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-2 block">Change Type</label>
-                          <div className="grid grid-cols-2 gap-2">
-                            {["copy", "creative", "formatting", "other"].map(type => (
+                          <div className="grid grid-cols-3 gap-2">
+                            {["Content", "Design", "Concept", "Other"].map(type => (
                               <button
                                 key={type}
                                 onClick={() => setReqChangeType(type)}

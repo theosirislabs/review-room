@@ -1,14 +1,16 @@
 services:
   review-room:
     image: osiris-review-room:latest
+    user: root
     container_name: review-room-app
     restart: always
     volumes:
       - ./data:/app/data
+    env_file:
+      - .env
     environment:
       - NODE_ENV=production
       - PORT=3000
-      - AGENCY_PASSWORD=osiris2026
     networks:
       - dokploy_default
     deploy:

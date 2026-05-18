@@ -25,6 +25,7 @@ COPY --from=builder /app/dist ./dist
 
 # Copy server and TypeScript source needed at runtime
 COPY server.ts ./
+COPY oidc.ts ./
 COPY tsconfig.json ./
 COPY src ./src
 
