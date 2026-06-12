@@ -26,7 +26,7 @@ interface Props {
   onDeleteComment: (postId: string, commentId: string) => void;
 }
 
-import { isVideo, fallbackSvg, parseDateSafe, isPostVisibleToClient } from "../utils";
+import { isVideo, fallbackSvg, parseDateSafe, isPostVisibleToClient, shouldRenderAsVideo } from "../utils";
 import { createAndCopyClientPostShare } from "../clientPostShare";
 import OsirisLogo from "./OsirisLogo";
 import { useTheme } from "../theme";
@@ -86,7 +86,7 @@ function MediaViewer({ urls, format, thumbnailUrl: _thumbnailUrl }: { urls: stri
         </div>
       )}
 
-      {isVideo(url) || format === "reel" ? (
+      {shouldRenderAsVideo(url, format) ? (
         <div className={`relative w-full h-full flex items-center justify-center transition-opacity duration-300 ${loaded ? "opacity-100" : "opacity-0"}`}>
           <video
             key={url}
@@ -171,7 +171,7 @@ function GridTile({ post, index, onClick, isSelected, isSelectMode, onToggleSele
       {!loaded && <div className="absolute inset-0 skeleton animate-pulse z-10" />}
       {/* Media */}
       {post.thumbnailUrl || post.mediaUrls[0] ? (
-        post.thumbnailUrl || isVideo(post.mediaUrls[0]) || post.format === "reel" ? (
+        post.thumbnailUrl || shouldRenderAsVideo(post.mediaUrls[0], post.format) ? (
           <div className="w-full h-full relative">
             {post.thumbnailUrl ? (
               <img src={post.thumbnailUrl} alt={post.title} onLoad={() => setLoaded(true)} onError={(e) => { e.currentTarget.src = fallbackSvg; setLoaded(true); }} className={`w-full h-full object-cover transition-all duration-500 group-hover:scale-105 ${loaded ? "opacity-100" : "opacity-0"}`} />
@@ -256,7 +256,7 @@ function ScheduleRow({ post, onClick }: ScheduleRowProps) {
         {post.thumbnailUrl || post.mediaUrls[0] ? (
           post.thumbnailUrl ? (
             <img src={post.thumbnailUrl} onLoad={() => setLoaded(true)} onError={(e) => { e.currentTarget.src = fallbackSvg; setLoaded(true); }} alt="" className={`w-full h-full object-cover transition-opacity duration-300 ${loaded ? "opacity-100" : "opacity-0"}`} />
-          ) : isVideo(post.mediaUrls[0]) || post.format === "reel" ? (
+          ) : shouldRenderAsVideo(post.mediaUrls[0], post.format) ? (
             <>
               <video src={post.mediaUrls[0]} onLoadedData={() => setLoaded(true)} onError={(e) => { (e.currentTarget.nextElementSibling as HTMLElement)?.classList.remove("hidden"); e.currentTarget.classList.add("hidden"); setLoaded(true); }} className={`w-full h-full object-cover transition-opacity duration-300 ${loaded ? "opacity-100" : "opacity-0"}`} muted autoPlay loop playsInline />
               <img src={fallbackSvg} className="hidden w-full h-full object-cover" alt="Fallback" />

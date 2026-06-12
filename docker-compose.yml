@@ -1,7 +1,6 @@
 services:
   review-room:
     image: osiris-review-room:latest
-    user: root
     container_name: review-room-app
     restart: always
     volumes:
@@ -11,15 +10,16 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3000
+      - NODE_OPTIONS=--max-old-space-size=1536
     networks:
       - dokploy_default
     deploy:
       resources:
         limits:
-          cpus: '1.0'
-          memory: 1G
+          cpus: '2.0'
+          memory: 2G
         reservations:
-          memory: 256M
+          memory: 512M
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
       interval: 30s

@@ -17,7 +17,7 @@ import CampaignManagerModal from "./CampaignManagerModal";
 import CalendarView from "./CalendarView";
 import AnalyticsView from "./AnalyticsView";
 import { useToast } from "./Toast";
-import { isVideo, fallbackSvg, parseDateSafe } from "../utils";
+import { isVideo, fallbackSvg, parseDateSafe, shouldRenderAsVideo } from "../utils";
 import { createAndCopyClientPostShare } from "../clientPostShare";
 import { useTheme } from "../theme";
 import OsirisLogo from "./OsirisLogo";
@@ -656,7 +656,7 @@ export default function InternalView({
                 {(post.thumbnailUrl || (post.mediaUrls && post.mediaUrls[0])) ? (
                   post.thumbnailUrl ? (
                     <img src={post.thumbnailUrl} alt={post.title} onError={(e) => { e.currentTarget.src = fallbackSvg; }} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
-                  ) : isVideo(post.mediaUrls[0]) || post.format === "reel" ? (
+                  ) : shouldRenderAsVideo(post.mediaUrls[0], post.format) ? (
                     <video 
                       src={post.mediaUrls[0]} 
                       onMouseEnter={(e) => e.currentTarget.play()}
@@ -800,7 +800,7 @@ export default function InternalView({
                 {/* Media Playback Area */}
                 <div className="flex-1 flex items-center justify-center p-6 relative group/viewer">
                   {activePost.mediaUrls.length > 0 ? (
-                    isVideo(activePost.mediaUrls[activeImageIdx]) || activePost.format === "reel" ? (
+                    shouldRenderAsVideo(activePost.mediaUrls[activeImageIdx], activePost.format) ? (
                       <div className="w-full h-full flex items-center justify-center relative">
                         <video
                           ref={videoRef}
@@ -877,7 +877,7 @@ export default function InternalView({
                         onClick={() => setActiveImageIdx(i)}
                         className={`w-14 h-14 rounded-lg overflow-hidden shrink-0 border-2 transition-all relative group/mini ${i === activeImageIdx ? "border-indigo-500 scale-105 shadow-lg" : "border-transparent opacity-60 hover:opacity-100"}`}
                       >
-                        {isVideo(url) ? (
+                        {shouldRenderAsVideo(url, activePost.format) ? (
                           <div className="w-full h-full bg-zinc-800 flex items-center justify-center text-[8px] text-white font-bold tracking-tighter">VIDEO</div>
                         ) : (
                           <img src={url} alt="" onError={(e) => { e.currentTarget.src = fallbackSvg; }} className="w-full h-full object-cover" referrerPolicy="no-referrer" />

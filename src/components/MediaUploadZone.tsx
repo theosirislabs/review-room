@@ -10,7 +10,7 @@ interface MediaUploadZoneProps {
     maxFiles?: number;
     format?: string;
 }
-import { isVideo } from "../utils";
+import { isVideo, shouldRenderAsVideo } from "../utils";
 
 const CHUNK_SIZE = 25 * 1024 * 1024; // 25MB per chunk (well under Cloudflare 100MB limit)
 /** Use chunked upload above this size so each request stays small (avoids proxy timeouts / dropped connections on one huge POST). */
@@ -510,7 +510,7 @@ export default function MediaUploadZone({ mediaUrls, onMediaChange, thumbnailUrl
                             {/* Drag handle */}
                             <div className="absolute inset-0 z-10 cursor-grab active:cursor-grabbing" />
                             {/* Media */}
-                            {isVideo(url) || format === "reel" ? (
+                            {shouldRenderAsVideo(url, format) ? (
                                 <div 
                                     className="w-full h-full relative bg-zinc-900 flex items-center justify-center overflow-hidden"
                                     onMouseEnter={() => generateFrames(url)}

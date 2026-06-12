@@ -1,3 +1,4 @@
+/** Returns true if the URL appears to point to a video file. */
 export function isVideo(url: string | undefined): boolean {
     if (!url) return false;
     const lower = url.toLowerCase();
@@ -7,14 +8,19 @@ export function isVideo(url: string | undefined): boolean {
         lower.includes(".webm") ||
         lower.includes(".avi") ||
         lower.includes(".m4v") ||
+        lower.endsWith(".m4v") ||
+        lower.endsWith(".mp4") ||
+        lower.endsWith(".mov") ||
+        lower.endsWith(".webm") ||
+        lower.endsWith(".avi") ||
         lower.includes("seeds/video") ||
         lower.includes("video/") ||
         lower.includes("type=video") ||
-        // Google Drive file share links have no extension in the URL but usually point to one file (often video for reels)
-        (lower.includes("drive.google.com") && lower.includes("/file/d/")) ||
-        (lower.includes("drive.google.com") && lower.includes("uc?") && lower.includes("export=download")) ||
-        // Dropbox shared links (dl=1 direct)
-        (lower.includes("dropbox.com") && lower.includes("/s/"))
+        lower.includes("type%3Dvideo") ||
+        // Google Drive with a video extension in the filename portion
+        (lower.includes("drive.google.com") && lower.includes("/file/d/") && /\.(mp4|mov|webm|avi|m4v)(\?|$|%3F)/.test(lower)) ||
+        // Dropbox shared links that point to video files
+        (lower.includes("dropbox.com") && /\.(mp4|mov|webm|avi|m4v)(\?|$)/.test(lower))
     );
 }
 
@@ -29,8 +35,43 @@ export function isImageUrl(url: string | undefined): boolean {
         lower.includes(".gif") ||
         lower.includes(".webp") ||
         lower.includes(".bmp") ||
+        lower.endsWith(".jpg") ||
+        lower.endsWith(".jpeg") ||
+        lower.endsWith(".png") ||
+        lower.endsWith(".gif") ||
+        lower.endsWith(".webp") ||
         lower.includes("image/") ||
-        lower.includes("type=image")
+        lower.includes("type=image") ||
+        lower.includes("type%3Dimage")
+    );
+}
+
+/**
+ * Determines the correct media rendering type.
+ * - If format is "reel" and URL is unknown/unclear → video (user explicitly chose reel)
+ * - If format is "image"/"carousel" and URL looks like video → video (auto-detect)
+ * - Google Drive links with no extension in filename → use the format field as source of truth
+ * - When URL type is ambiguous and not marked as reel → image (safer fallback)
+ */
+export function shouldRenderAsVideo(url: string | undefined, format: string): boolean {
+    if (!url) return false;
+    if (format === "reel") return true; // user explicitly chose reel format
+    // If URL inspection clearly says video, trust it
+    if (isVideo(url)) return true;
+    // For Google Drive/Dropbox links whose file extension is ambiguous, trust the format
+    if (isFromCloudStorage(url)) return format === "reel";
+    // Default: image
+    return false;
+}
+
+/** Returns true if the URL originates from a cloud storage service where the file extension may be hidden. */
+export function isFromCloudStorage(url: string | undefined): boolean {
+    if (!url) return false;
+    const lower = url.toLowerCase();
+    return (
+        lower.includes("drive.google.com") ||
+        lower.includes("dropbox.com") ||
+        lower.includes("picsum.photos")
     );
 }
 
