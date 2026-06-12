@@ -58,7 +58,9 @@ function AppContent() {
   const isClientPath = location.pathname.startsWith("/client/");
   const isAgencyPath = location.pathname.startsWith("/agency/");
   const isReviewSharePath = location.pathname.startsWith("/review/");
-  const reviewShareToken = isReviewSharePath ? (location.pathname.split("/")[2] || "") : "";
+  const isShareSetPath = isReviewSharePath && location.pathname.startsWith("/review/set/");
+  const reviewShareToken = isReviewSharePath && !isShareSetPath ? (location.pathname.split("/")[2] || "") : "";
+  const shareSetToken = isShareSetPath ? (location.pathname.split("/")[3] || "") : "";
   const derivedTenant = isClientPath || isAgencyPath ? location.pathname.split("/")[2] : null;
   const viewMode = isReviewSharePath ? "client" : isClientPath ? "client" : "internal";
 
@@ -102,7 +104,7 @@ function AppContent() {
     return !!(adminToken || localStorage.getItem(`osiris_${tid}_internal`));
   }, [adminToken, workspaceTenantId, tenantId]);
 
-  useEffect(() => { setLoaded(false); }, [tenantId, reviewShareToken]);
+  useEffect(() => { setLoaded(false); }, [tenantId, reviewShareToken, shareSetToken]);
 
   // Authentik SSO callback: cookie session → localStorage token
   useEffect(() => {
@@ -187,7 +189,9 @@ function AppContent() {
 
     sock.on("connect", () => {
       setConnected(true);
-      if (reviewShareToken) {
+      if (shareSetToken) {
+        sock.emit("join-share-set", { shareSetToken });
+      } else if (reviewShareToken) {
         sock.emit("join-post-share", { shareToken: reviewShareToken });
       } else if (tenantId) {
         sock.emit("join-tenant", { tenantId, mode: viewMode, token: token });
@@ -249,7 +253,7 @@ function AppContent() {
     });
 
     return () => { sock.disconnect(); };
-  }, [tenantId, viewMode, token, reviewShareToken, isReviewSharePath, tenant?.id]);
+  }, [tenantId, viewMode, token, reviewShareToken, shareSetToken, isReviewSharePath, tenant?.id]);
 
   const emit = useCallback(
     (event: string, data: any, cb?: (res: any) => void) => socket?.emit(event, data, cb),
@@ -498,7 +502,8 @@ function AppContent() {
               brandName={tenant?.name || workspaceTenantId || tenantId || "Review"}
               logoUrl={tenant?.logoUrl}
               bio={tenant?.bio}
-              singlePostShareMode={isReviewSharePath}
+              singlePostShareMode={!!reviewShareToken}
+              shareSetMode={!!shareSetToken}
               postShareLinkEligible={postShareLinkEligible}
               adminToken={adminToken}
               onUpdatePost={handleUpdatePost}

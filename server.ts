@@ -185,6 +185,35 @@ try {
   }
 }
 
+// ── Share Sets ──────────────────────────────────────────────
+try {
+  db.prepare("SELECT 1 FROM share_sets LIMIT 1").get();
+} catch (e: any) {
+  if (e.message?.includes("no such table")) {
+    console.log("[MIGRATION] Creating share_sets and share_set_posts tables");
+    db.exec(`
+      CREATE TABLE share_sets (
+        id TEXT PRIMARY KEY,
+        tenantId TEXT NOT NULL,
+        name TEXT,
+        token TEXT NOT NULL UNIQUE,
+        createdAt TEXT NOT NULL,
+        expiresAt TEXT,
+        revoked INTEGER DEFAULT 0
+      );
+      CREATE INDEX idx_share_sets_token ON share_sets(token);
+      CREATE INDEX idx_share_sets_tenant ON share_sets(tenantId);
+      CREATE TABLE share_set_posts (
+        shareSetId TEXT NOT NULL,
+        postId TEXT NOT NULL,
+        PRIMARY KEY (shareSetId, postId)
+      );
+    `);
+  }
+}
+
+runMigration("SELECT archivedAt FROM posts LIMIT 1", "ALTER TABLE posts ADD COLUMN archivedAt TEXT", "Adding 'archivedAt' to posts");
+
 // ── Seed Tenants ──────────────────────────────────────────────
 const tenantCount = db.prepare("SELECT COUNT(*) as count FROM tenants").get() as { count: number };
 if (tenantCount.count === 0) {
@@ -550,8 +579,10 @@ function isPostVisibleOnClientLink(p: { clientStatus?: string }) {
   return p.clientStatus !== "Not Ready for Client";
 }
 
-function getPosts(tenantId: string) {
-  const posts = db.prepare("SELECT * FROM posts WHERE tenantId = ?").all(tenantId) as any[];
+function getPosts(tenantId: string, includeArchived = false) {
+  let query = "SELECT * FROM posts WHERE tenantId = ?";
+  if (!includeArchived) query += " AND archivedAt IS NULL";
+  const posts = db.prepare(query).all(tenantId) as any[];
   const comments = db.prepare("SELECT * FROM comments WHERE postId IN (SELECT id FROM posts WHERE tenantId = ?)").all(tenantId) as any[];
   const tasks = db.prepare("SELECT * FROM tasks WHERE postId IN (SELECT id FROM posts WHERE tenantId = ?)").all(tenantId) as any[];
   return posts.map((p) => ({
@@ -1317,6 +1348,33 @@ async function startServer() {
     res.json(getPosts(tenantId));
   });
 
+  // ── Global Search ─────────────────────────────────────────
+  app.get("/api/search", (req, res) => {
+    if (!requireAuth(req, res)) return;
+    const q = ((req.query.q as string) || "").trim();
+    if (!q) return res.json([]);
+    const like = `%${q}%`;
+    const rows = db.prepare(`
+      SELECT p.*, t.name as tenantName
+      FROM posts p
+      JOIN tenants t ON t.id = p.tenantId
+      WHERE p.title LIKE ? OR p.caption LIKE ? OR p.hashtags LIKE ? OR t.name LIKE ?
+      LIMIT 50
+    `).all(like, like, like, like) as any[];
+    const results = rows.map((r: any) => {
+      const post = {
+        ...r,
+        mediaUrls: JSON.parse(r.mediaUrls || "[]"),
+        hashtags: JSON.parse(r.hashtags || "[]"),
+        isBlocked: r.isBlocked === 1,
+        revisionCount: r.revisionCount || 0,
+      };
+      delete post.tenantName;
+      return { post, tenant: { id: r.tenantId, name: r.tenantName } };
+    });
+    res.json(results);
+  });
+
   // Single-post client review link (scoped token; does not expose full client workspace)
   app.post("/api/tenants/:tenantId/posts/:postId/client-share", (req, res) => {
     const { tenantId, postId } = req.params;
@@ -1347,6 +1405,51 @@ async function startServer() {
       io.to(`share:${token}`).emit("post-deleted", postId);
     }
     res.json({ success: true, revoked: tokens.length });
+  });
+
+  // ── Share Sets REST ────────────────────────────────────────
+  app.post("/api/tenants/:tenantId/share-sets", (req, res) => {
+    const { tenantId } = req.params;
+    if (!requireAgencyOrInternalStaff(req, res, tenantId)) return;
+    const { postIds, name, expiresInDays } = req.body || {};
+    if (!Array.isArray(postIds) || postIds.length === 0) {
+      return res.status(400).json({ error: "postIds array is required" });
+    }
+    const id = randomUUID();
+    const token = randomUUID();
+    const createdAt = new Date().toISOString();
+    const expiresAt = expiresInDays ? new Date(Date.now() + expiresInDays * 86400000).toISOString() : null;
+    db.transaction(() => {
+      db.prepare(
+        "INSERT INTO share_sets (id, tenantId, name, token, createdAt, expiresAt, revoked) VALUES (?,?,?,?,?,?,0)"
+      ).run(id, tenantId, name || null, token, createdAt, expiresAt);
+      const insertPost = db.prepare("INSERT INTO share_set_posts (shareSetId, postId) VALUES (?,?)");
+      for (const postId of postIds) {
+        insertPost.run(id, postId);
+      }
+    })();
+    const host = req.get("x-forwarded-host") || req.get("host") || `localhost:${PORT}`;
+    const proto = (req.get("x-forwarded-proto") || req.protocol || "http").split(",")[0].trim();
+    const sharePath = `/review/set/${token}`;
+    res.json({ shareUrl: `${proto}://${host}${sharePath}`, sharePath, token });
+  });
+
+  app.get("/api/tenants/:tenantId/share-sets", (req, res) => {
+    const { tenantId } = req.params;
+    if (!requireAgencyOrInternalStaff(req, res, tenantId)) return;
+    const sets = db.prepare("SELECT * FROM share_sets WHERE tenantId = ? ORDER BY createdAt DESC").all(tenantId) as any[];
+    const results = sets.map((s: any) => {
+      const count = db.prepare("SELECT COUNT(*) as cnt FROM share_set_posts WHERE shareSetId = ?").get(s.id) as { cnt: number };
+      return { ...s, postCount: count.cnt };
+    });
+    res.json(results);
+  });
+
+  app.delete("/api/share-sets/:id", (req, res) => {
+    if (!requireAuth(req, res)) return;
+    const { id } = req.params;
+    db.prepare("UPDATE share_sets SET revoked = 1 WHERE id = ?").run(id);
+    res.json({ success: true });
   });
 
   app.get("/api/posts/schedule", (req, res) => {
@@ -1551,7 +1654,7 @@ async function startServer() {
     // Global Event Authorization Middleware
     socket.use(([event, ...args], next) => {
       // Allow connection and admin-level events to bypass tenant check
-      if (["join-tenant", "join-post-share", "upsert-tenant", "delete-tenant", "disconnect"].includes(event)) {
+      if (["join-tenant", "join-post-share", "join-share-set", "upsert-tenant", "delete-tenant", "disconnect"].includes(event)) {
         return next();
       }
 
@@ -1663,6 +1766,38 @@ async function startServer() {
       socket.emit("initial-data", { posts, tenant: tenantForClient, sharePostId: row.postId });
     });
 
+    socket.on("join-share-set", (payload: { token?: string }) => {
+      const shareSetToken = (payload?.token || "").trim();
+      if (!shareSetToken) {
+        socket.emit("error", "Missing share set token.");
+        return;
+      }
+      const now = new Date().toISOString();
+      const set = db.prepare(
+        "SELECT * FROM share_sets WHERE token = ? AND revoked = 0 AND (expiresAt IS NULL OR expiresAt > ?)"
+      ).get(shareSetToken, now) as any | undefined;
+      if (!set) {
+        socket.emit("error", "Invalid, expired, or revoked share set link.");
+        return;
+      }
+      const tenant = db.prepare("SELECT * FROM tenants WHERE id = ?").get(set.tenantId) as any;
+      if (!tenant) {
+        socket.emit("error", "Workspace not found.");
+        return;
+      }
+      const parsed = JSON.parse(tenant.settings || "{}");
+      const tenantForClient = {
+        ...tenant,
+        settings: { theme: parsed.theme },
+      };
+      const postIds = db.prepare("SELECT postId FROM share_set_posts WHERE shareSetId = ?").all(set.id) as { postId: string }[];
+      const posts = postIds
+        .map((row) => getPostStripForShare(set.tenantId, row.postId))
+        .filter((p) => p !== null);
+      socket.join(`share-set:${set.token}`);
+      socket.emit("initial-data", { posts, tenant: tenantForClient, shareSetId: set.id });
+    });
+
     socket.on("create-post", (data: { tenantId: string; post: any }) => {
       const { tenantId, post } = data;
       const id = post.id || randomUUID();
@@ -1715,7 +1850,23 @@ async function startServer() {
           const existing = db.prepare("SELECT internalStatus, clientStatus, revisionCount FROM posts WHERE id = ? AND tenantId = ?").get(post.id, tenantId) as any;
           if (!existing) return;
 
-          const internalStatus = post.internalStatus || existing.internalStatus || "Draft";
+          let internalStatus = post.internalStatus || existing.internalStatus || "Draft";
+
+          // ── Client auto-advance ─────────────────────────────────────────
+          // When a client session (share link or client-mode join) updates clientStatus,
+          // automatically advance the internalStatus to match.
+          const shareScope = (socket as any).shareScope as { tenantId: string; postId: string } | undefined;
+          const isClientSession = !!shareScope || (
+            socket.rooms.has(`${tenantId}:client`) && !socket.rooms.has(`${tenantId}:internal`)
+          );
+          if (isClientSession) {
+            if (post.clientStatus === "Approved") {
+              internalStatus = "Approved";
+            } else if (post.clientStatus === "Changes Requested") {
+              internalStatus = "Changes Requested";
+            }
+          }
+
           const clientStatus = deriveClientStatus(internalStatus, post.clientStatus, existing.clientStatus);
           let revisionCount = existing.revisionCount || 0;
           if (existing.internalStatus !== "Changes Requested" && internalStatus === "Changes Requested") {

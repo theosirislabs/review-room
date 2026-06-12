@@ -7,7 +7,7 @@ import {
   CheckCircle2, CheckSquare, MessageSquare, Tag,
   Link, Layout, Lock, Copy, Settings, Share2,
   AlertCircle, Play, Send, Zap, Image as ImageIcon, Camera, Loader2,
-  Calendar, BarChart2, Flag, GitBranch,   ChevronDown, Sun, Moon
+  Calendar, BarChart2, Flag, GitBranch,   ChevronDown, Sun, Moon, Archive
 } from "lucide-react";
 import PostFormModal from "./PostFormModal";
 import ConfirmDialog from "./ConfirmDialog";
@@ -19,6 +19,7 @@ import AnalyticsView from "./AnalyticsView";
 import { useToast } from "./Toast";
 import { isVideo, fallbackSvg, parseDateSafe, shouldRenderAsVideo } from "../utils";
 import { createAndCopyClientPostShare } from "../clientPostShare";
+import { createShareSetLink } from "../shareSet";
 import { useTheme } from "../theme";
 import OsirisLogo from "./OsirisLogo";
 type AgencyRole = "super-admin" | "graphic-designer" | "marketing-team" | "reviewer";
@@ -244,6 +245,17 @@ export default function InternalView({
     });
   };
 
+  const handleBulkArchive = () => {
+    selectedIds.forEach((id) => {
+      const post = posts.find((p) => p.id === id);
+      if (post) {
+        onUpdatePost({ ...post, archivedAt: new Date().toISOString() });
+      }
+    });
+    clearSelection();
+    success(`${selectedIds.size} posts archived`);
+  };
+
   const handleBulkStatusChange = (status: InternalStatus) => {
     selectedIds.forEach((id) => {
       const post = posts.find((p) => p.id === id);
@@ -276,6 +288,17 @@ export default function InternalView({
         success(`${selectedIds.size} posts sent to client`);
       },
     });
+  };
+
+  const handleShareSelected = async () => {
+    const ids = Array.from(selectedIds);
+    const r = await createShareSetLink({ tenantId: _tenantId, postIds: ids, adminToken });
+    if (r.ok) {
+      success(`Share link for ${ids.length} posts copied to clipboard`);
+      clearSelection();
+    } else {
+      toastError(r.error);
+    }
   };
 
   // ── Video frame capture ─────────────────────────────────────
@@ -1307,6 +1330,9 @@ export default function InternalView({
                   <Send className="w-4 h-4" /> Push to Review
                 </button>
               )}
+              <button onClick={handleShareSelected} className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-lg shadow-emerald-500/20">
+                <Link className="w-4 h-4" /> Share Selected
+              </button>
               {canSchedule && (
                 <>
                   <button onClick={() => handleBulkStatusChange("Scheduled")} className="px-4 py-2 hover:bg-zinc-800 rounded-xl text-xs font-bold transition-all flex items-center gap-2">
@@ -1323,6 +1349,9 @@ export default function InternalView({
                     <Edit3 className="w-4 h-4 text-blue-400" /> Move to Draft
                   </button>
                   <div className="w-px h-6 bg-zinc-800 mx-2" />
+                  <button onClick={handleBulkArchive} className="px-4 py-2 hover:bg-zinc-800 rounded-xl text-xs font-bold transition-all flex items-center gap-2">
+                    <Archive className="w-4 h-4" /> Archive
+                  </button>
                   <button onClick={handleBulkDelete} className="px-4 py-2 hover:bg-red-500/10 hover:text-red-400 text-red-500 rounded-xl text-xs font-bold transition-all flex items-center gap-2">
                     <Trash2 className="w-4 h-4" /> Delete
                   </button>

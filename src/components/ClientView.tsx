@@ -18,6 +18,8 @@ interface Props {
   bio?: string;
   /** When true (single-post magic link), show the post even if client status is "Not Ready for Client". */
   singlePostShareMode?: boolean;
+  /** When true, this is a share-set (multi-post review) view. */
+  shareSetMode?: boolean;
   /** Agency / internal staff: show control to copy a single-post review link from the client UI. */
   postShareLinkEligible?: boolean;
   adminToken?: string;
@@ -27,7 +29,6 @@ interface Props {
 }
 
 import { isVideo, fallbackSvg, parseDateSafe, isPostVisibleToClient, shouldRenderAsVideo } from "../utils";
-import { createAndCopyClientPostShare } from "../clientPostShare";
 import OsirisLogo from "./OsirisLogo";
 import { useTheme } from "../theme";
 
@@ -299,11 +300,11 @@ function ScheduleRow({ post, onClick }: ScheduleRowProps) {
 }
 
 /* ── Main component ───────────────────────────────────────── */
-export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, singlePostShareMode = false, postShareLinkEligible = false, adminToken = "", onUpdatePost, onAddComment, onDeleteComment }: Props) {
+export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, singlePostShareMode = false, shareSetMode = false, postShareLinkEligible = false, adminToken = "", onUpdatePost, onAddComment, onDeleteComment }: Props) {
   const { theme, toggleTheme } = useTheme();
   const visiblePosts = useMemo(
-    () => (singlePostShareMode ? posts : posts.filter((p) => isPostVisibleToClient(p.clientStatus))),
-    [posts, singlePostShareMode]
+    () => (singlePostShareMode || shareSetMode ? posts : posts.filter((p) => isPostVisibleToClient(p.clientStatus))),
+    [posts, singlePostShareMode, shareSetMode]
   );
 
   const [activeTab, setActiveTab] = useState<"grid" | "schedule">("grid");
@@ -544,7 +545,7 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
             )}
             <span className="font-semibold text-sm text-zinc-900 truncate max-w-[120px] sm:max-w-none">{displayName}</span>
             <span className="hidden sm:block text-zinc-300">·</span>
-            <span className="hidden sm:block text-zinc-500 text-sm">{singlePostShareMode ? "Shared post" : "Review Package"}</span>
+            <span className="hidden sm:block text-zinc-500 text-sm">{shareSetMode ? "Shared Set" : singlePostShareMode ? "Shared post" : "Review Package"}</span>
           </div>
 
           {/* Progress / summary */}

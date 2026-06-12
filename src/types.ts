@@ -59,6 +59,7 @@ export interface Post {
   scheduledAt?: string;
   revisionCount?: number;
   publishedAt?: string;
+  archivedAt?: string;
 }
 
 export interface Comment {
@@ -113,4 +114,15 @@ export interface ActivityEvent {
   detail?: string;
   user?: string;
   timestamp: string;
+}
+
+export interface ShareSet {
+  id: string;
+  tenantId: string;
+  name: string;
+  token: string;
+  createdAt: string;
+  expiresAt: string;
+  revoked: boolean;
+  postCount?: number;
 }
