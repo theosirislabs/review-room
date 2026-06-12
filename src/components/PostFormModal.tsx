@@ -29,6 +29,7 @@ type FormState = {
     isBlocked: boolean;
     blockedReason: string;
     thumbnailUrl: string;
+    dueDate: string;
 };
 
 interface Props {
@@ -58,6 +59,7 @@ export default function PostFormModal({ post, onSubmit, onClose }: Props) {
         isBlocked: post?.isBlocked ?? false,
         blockedReason: post?.blockedReason ?? "",
         thumbnailUrl: post?.thumbnailUrl ?? "",
+        dueDate: post?.dueDate ?? "",
     });
     const [tagInput, setTagInput] = useState("");
     const [saving, setSaving] = useState(false);
@@ -146,6 +148,7 @@ export default function PostFormModal({ post, onSubmit, onClose }: Props) {
                 clientStatus: form.internalStatus === "Ready for Client" ? "Needs Your Review" : form.clientStatus,
                 internalStatus: form.internalStatus,
                 thumbnailUrl: form.thumbnailUrl || post?.thumbnailUrl || undefined,
+                dueDate: form.dueDate || undefined,
             };
             onSubmit(payload);
             onClose();
@@ -279,6 +282,12 @@ export default function PostFormModal({ post, onSubmit, onClose }: Props) {
                                     <input type="text" value={form.time} onChange={(e) => set("time", e.target.value)}
                                         placeholder="09:00 AM" className={inputClass} />
                                 </div>
+                            </div>
+
+                            {/* Feedback Due */}
+                            <div>
+                                <label className={labelClass}>Feedback Due</label>
+                                <input type="date" value={form.dueDate} onChange={(e) => set("dueDate", e.target.value)} className={inputClass} />
                             </div>
 
                             {/* Statuses */}

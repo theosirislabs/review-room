@@ -84,6 +84,11 @@ export default function DashboardView({
 
     const fetcher = (url: string) => fetch(url, { headers: { Authorization: `Bearer ${adminToken}` } }).then(r => r.ok ? r.json() : null);
 
+    const { data: searchResults } = useSWR(
+        adminToken && search.length >= 2 ? `/api/search?q=${encodeURIComponent(search)}` : null,
+        fetcher
+    );
+
     const { data: stats, mutate: mutateStats } = useSWR<GlobalStats>(adminToken ? "/api/stats" : null, fetcher);
 
     const copyLink = (e: React.MouseEvent, type: "internal" | "client", tenant: Tenant) => {
@@ -328,6 +333,42 @@ export default function DashboardView({
                                     placeholder="Search clients..."
                                     className="bg-zinc-900 border border-zinc-800 text-white text-sm pl-9 pr-4 py-2 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder:text-zinc-600 w-48"
                                 />
+                                {/* Search Results Dropdown */}
+                                {search.length >= 2 && searchResults && Array.isArray(searchResults) && searchResults.length > 0 && (
+                                    <div className="absolute top-full left-0 right-0 mt-2 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl shadow-black/60 overflow-hidden z-[100] min-w-[320px]">
+                                        {searchResults.slice(0, 10).map((r: any, i: number) => (
+                                            <button
+                                                key={r.postId ?? i}
+                                                onClick={() => {
+                                                    onSelectTenant(
+                                                        { id: r.tenantId, name: r.clientName || r.tenantId, logoUrl: '', settings: {} } as any,
+                                                        "internal",
+                                                        adminToken
+                                                    );
+                                                    setSearch("");
+                                                }}
+                                                className="w-full flex items-center gap-3 px-4 py-3 hover:bg-zinc-800 transition-colors text-left border-b border-zinc-800 last:border-b-0"
+                                            >
+                                                {r.thumbnailUrl ? (
+                                                    <img src={r.thumbnailUrl} alt="" className="w-10 h-10 rounded-lg object-cover shrink-0" />
+                                                ) : (
+                                                    <div className="w-10 h-10 rounded-lg bg-zinc-800 flex items-center justify-center shrink-0">
+                                                        <Search className="w-4 h-4 text-zinc-600" />
+                                                    </div>
+                                                )}
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="text-sm font-semibold text-white truncate">{r.postTitle || r.title || 'Untitled'}</p>
+                                                    <p className="text-xs text-zinc-500 truncate">{r.clientName || r.tenantId}</p>
+                                                </div>
+                                                {r.status && (
+                                                    <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border border-zinc-700 text-zinc-300 shrink-0">
+                                                        {r.status}
+                                                    </span>
+                                                )}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                             {isSuperAdmin && (
                                 <Button variant="secondary" onClick={() => setShowUserModal(true)} icon={<Shield className="w-4 h-4" />}>

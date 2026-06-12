@@ -7,7 +7,7 @@ import {
   CheckCircle2, CheckSquare, MessageSquare, Tag,
   Link, Layout, Lock, Copy, Settings, Share2,
   AlertCircle, Play, Send, Zap, Image as ImageIcon, Camera, Loader2,
-  Calendar, BarChart2, Flag, GitBranch,   ChevronDown, Sun, Moon, Archive
+  Calendar, BarChart2, Flag, GitBranch, Clock, ChevronDown, Sun, Moon, Archive, RotateCcw
 } from "lucide-react";
 import PostFormModal from "./PostFormModal";
 import ConfirmDialog from "./ConfirmDialog";
@@ -98,10 +98,11 @@ export default function InternalView({
   // ── Selections & UI state ─────────────────────────────────────
   const [activePostId, setActivePostId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [activeTab, setActiveTab] = useState<"all" | "blocked" | "needs-qa" | "client-changes">("all");
+  const [activeTab, setActiveTab] = useState<"all" | "blocked" | "needs-qa" | "client-changes" | "archived">("all");
   const [viewMode, setViewMode] = useState<"grid" | "calendar" | "analytics">("grid");
   const [search, setSearch] = useState("");
   const [campaignFilter, setCampaignFilter] = useState("");
+  const [archivedPosts, setArchivedPosts] = useState<Post[]>([]);
   const [newTaskText, setNewTaskText] = useState("");
   const [isAddingTask, setIsAddingTask] = useState(false);
   const [newCommentText, setNewCommentText] = useState("");
@@ -128,6 +129,18 @@ export default function InternalView({
         .catch(console.error);
     }
   }, [showGlobalOverview, adminToken]);
+
+  // ── Fetch archived posts when activeTab === "archived" ────────
+  useEffect(() => {
+    if (activeTab === "archived" && adminToken) {
+      fetch(`/api/tenants/${_tenantId}/archived-posts`, {
+        headers: { Authorization: `Bearer ${adminToken}` }
+      })
+        .then(res => res.ok ? res.json() : [])
+        .then(data => setArchivedPosts(data || []))
+        .catch(() => setArchivedPosts([]));
+    }
+  }, [activeTab, _tenantId, adminToken]);
 
   // ── ConfirmDialog state ───────────────────────────────────────
   const [confirm, setConfirm] = useState<{
@@ -590,6 +603,7 @@ export default function InternalView({
               { id: "blocked", label: "Blocked" },
               { id: "needs-qa", label: "Needs QA" },
               { id: "client-changes", label: "Client Changes" },
+              { id: "archived", label: "Archived" },
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -615,6 +629,7 @@ export default function InternalView({
           )}
         </div>
 
+        {activeTab !== "archived" ? (<>
         <div className="flex flex-wrap items-center gap-3 sm:gap-6 mb-4 sm:mb-5 px-1" id="stats-bar">
           {[
             { label: "Total Posts", value: stats.total, color: "text-zinc-900" },
@@ -765,6 +780,11 @@ export default function InternalView({
                         <GitBranch className="w-2.5 h-2.5" />v{(post.revisionCount ?? 0) + 1}
                       </span>
                     )}
+                    {post.dueDate && new Date(post.dueDate) < new Date() && !["Approved", "Posted", "Scheduled"].includes(post.internalStatus) && (
+                      <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border border-red-300 text-red-600 bg-red-50 shrink-0 flex items-center gap-1">
+                        <Clock className="w-3 h-3" /> OVERDUE
+                      </span>
+                    )}
                   </div>
                   <input
                     type="date"
@@ -779,6 +799,66 @@ export default function InternalView({
             </div>
           ))}
         </div>
+        </> ) : (
+          /* Archived Posts Grid */
+          <div>
+            <div className="flex items-center gap-2 mb-4 px-1">
+              <Archive className="w-5 h-5 text-zinc-400" />
+              <span className="text-sm font-bold text-zinc-500">Archived Posts ({archivedPosts.length})</span>
+            </div>
+            {archivedPosts.length === 0 ? (
+              <div className="text-center py-20 text-zinc-400 bg-white rounded-3xl border border-zinc-100 shadow-sm">
+                <Archive className="w-10 h-10 mx-auto mb-3 opacity-20" />
+                <p className="text-base font-medium">No archived posts</p>
+                <p className="text-sm mt-1">Archived posts will appear here.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 sm:gap-6">
+                {archivedPosts.map((post) => (
+                  <div
+                    key={post.id}
+                    className="bg-white rounded-xl border-2 border-zinc-200 overflow-hidden shadow-sm flex flex-col relative opacity-80 hover:opacity-100 transition-opacity"
+                  >
+                    {/* Thumbnail */}
+                    <div className="relative aspect-[4/5] bg-zinc-100 overflow-hidden shrink-0">
+                      {(post.thumbnailUrl || (post.mediaUrls && post.mediaUrls[0])) ? (
+                        <img src={post.thumbnailUrl || post.mediaUrls[0]} alt={post.title} onError={(e) => { e.currentTarget.src = fallbackSvg; }} className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center">
+                          <ImageIcon className="w-10 h-10 text-zinc-300" />
+                        </div>
+                      )}
+                      <div className="absolute top-2 right-2 flex flex-col gap-2">
+                        <div className="bg-black/50 backdrop-blur-md text-white p-1.5 rounded-lg">
+                          {post.format === "carousel" && <Copy className="w-3.5 h-3.5" />}
+                          {post.format === "reel" && <Play className="w-3.5 h-3.5 fill-current" />}
+                          {post.format === "image" && <ImageIcon className="w-3.5 h-3.5" />}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="p-4 flex flex-col flex-1">
+                      <h3 className="font-bold text-sm text-zinc-900 line-clamp-2 mb-2 leading-tight">{post.title}</h3>
+                      <div className="mt-auto pt-2 border-t border-zinc-50 flex items-center justify-between gap-1">
+                        <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border bg-zinc-100 text-zinc-500 border-zinc-200">
+                          {post.internalStatus}
+                        </span>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onUpdatePost({ ...post, archivedAt: null });
+                          }}
+                          className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md bg-indigo-50 text-indigo-600 border border-indigo-200 hover:bg-indigo-100 transition-colors"
+                        >
+                          <RotateCcw className="w-3 h-3 inline mr-1" /> Restore
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>)}
 
       {/* ── Detail Overlay ─────────────────────────────────────── */}

@@ -149,6 +149,7 @@ runMigration("SELECT priority FROM comments LIMIT 1", "ALTER TABLE comments ADD 
 runMigration("SELECT slideIndex FROM comments LIMIT 1", "ALTER TABLE comments ADD COLUMN slideIndex INTEGER", "Adding 'slideIndex' to comments");
 runMigration("SELECT thumbnailUrl FROM posts LIMIT 1", "ALTER TABLE posts ADD COLUMN thumbnailUrl TEXT", "Adding 'thumbnailUrl' to posts");
 runMigration("SELECT script FROM posts LIMIT 1", "ALTER TABLE posts ADD COLUMN script TEXT", "Adding script to posts");
+runMigration("SELECT dueDate FROM posts LIMIT 1", "ALTER TABLE posts ADD COLUMN dueDate TEXT", "Adding 'dueDate' to posts");
 try {
   db.prepare("SELECT 1 FROM agency_users LIMIT 1").get();
 } catch (e: any) {
@@ -1445,6 +1446,13 @@ async function startServer() {
     res.json(results);
   });
 
+  app.get("/api/tenants/:tenantId/archived-posts", (req, res) => {
+    const { tenantId } = req.params;
+    if (!requireAgencyOrInternalStaff(req, res, tenantId)) return;
+    const posts = db.prepare("SELECT * FROM posts WHERE tenantId = ? AND archivedAt IS NOT NULL").all(tenantId) as any[];
+    res.json(posts.map(p => ({ ...p, mediaUrls: JSON.parse(p.mediaUrls || "[]") })));
+  });
+
   app.delete("/api/share-sets/:id", (req, res) => {
     if (!requireAuth(req, res)) return;
     const { id } = req.params;
@@ -1876,7 +1884,7 @@ async function startServer() {
           db.prepare(`UPDATE posts SET title=?, format=?, mediaUrls=?, caption=?, hashtags=?, date=?,
             time=?, clientStatus=?, internalStatus=?, assignee=?, campaignCode=?, contentPillar=?,
             internalNotes=?, assetLineage=?, isBlocked=?, blockedReason=?, thumbnailUrl=?,
-            scheduledAt=?, revisionCount=? WHERE id=? AND tenantId=?`)
+            scheduledAt=?, archivedAt=?, revisionCount=? WHERE id=? AND tenantId=?`)
             .run(
               post.title || "Untitled", 
               post.format || "image", 
@@ -1896,6 +1904,7 @@ async function startServer() {
               post.blockedReason || null,
               post.thumbnailUrl || null, 
               post.scheduledAt || null, 
+              post.archivedAt ?? null, 
               revisionCount, 
               post.id, 
               tenantId

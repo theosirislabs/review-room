@@ -60,6 +60,7 @@ export interface Post {
   revisionCount?: number;
   publishedAt?: string;
   archivedAt?: string;
+  dueDate?: string;
 }
 
 export interface Comment {
