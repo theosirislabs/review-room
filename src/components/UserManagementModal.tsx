@@ -17,6 +17,7 @@ interface AgencyUser {
   username: string;
   role: string;
   createdAt?: string;
+  hasPassword?: boolean;
 }
 
 interface Props {
@@ -31,7 +32,7 @@ export default function UserManagementModal({ isOpen, onClose, adminToken, onRef
   const [users, setUsers] = useState<AgencyUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
-  const [form, setForm] = useState({ username: "", password: "", role: "user" });
+  const [form, setForm] = useState({ username: "", password: "", role: "graphic-designer" });
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editRole, setEditRole] = useState<string>("graphic-designer");
@@ -61,7 +62,7 @@ export default function UserManagementModal({ isOpen, onClose, adminToken, onRef
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Failed to add user");
       success(`${form.username} added`);
-      setForm({ username: "", password: "", role: "user" });
+      setForm({ username: "", password: "", role: "graphic-designer" });
       setAdding(false);
       setUsers((prev) => [...prev, data]);
       onRefresh?.();
@@ -74,7 +75,10 @@ export default function UserManagementModal({ isOpen, onClose, adminToken, onRef
 
   const updateUser = async (id: string) => {
     const body: { role?: string; password?: string } = { role: editRole };
-    if (editPassword.trim()) body.password = editPassword;
+    if (editPassword.trim()) {
+      if (editPassword.trim().length < 8) return toastError("Password must be at least 8 characters");
+      body.password = editPassword;
+    }
     const res = await fetch(`/api/agency-users/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${adminToken}` },
@@ -94,7 +98,12 @@ export default function UserManagementModal({ isOpen, onClose, adminToken, onRef
   };
 
   const deleteUser = async (id: string) => {
-    await fetch(`/api/agency-users/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${adminToken}` } });
+    const res = await fetch(`/api/agency-users/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${adminToken}` } });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      toastError(data.error || "Failed to remove user");
+      return;
+    }
     setUsers((prev) => prev.filter((u) => u.id !== id));
     success("User removed");
     setConfirmDelete({ open: false, id: "", username: "" });
@@ -132,6 +141,8 @@ export default function UserManagementModal({ isOpen, onClose, adminToken, onRef
           <div className="flex-1 overflow-y-auto p-6 space-y-3">
             {loading ? (
               <div className="text-center py-8 text-zinc-400">Loading...</div>
+            ) : users.length === 0 ? (
+              <div className="text-center py-8 text-zinc-400 text-sm">No agency users yet.</div>
             ) : (
               users.map((u) => (
                 <div key={u.id} className="flex items-center gap-4 p-4 bg-zinc-50 rounded-2xl border border-zinc-100 group">
@@ -140,9 +151,14 @@ export default function UserManagementModal({ isOpen, onClose, adminToken, onRef
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="font-bold text-zinc-900 text-sm truncate">{u.username}</p>
+                    <div className="flex items-center gap-1.5 mt-1">
                     <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${ROLE_LABELS[u.role]?.color || "bg-zinc-100 text-zinc-600"}`}>
                       {ROLE_LABELS[u.role]?.label || u.role}
                     </span>
+                    <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-white border border-zinc-200 text-zinc-500">
+                      {u.hasPassword ? "Password" : "SSO"}
+                    </span>
+                    </div>
                   </div>
                   {editingId === u.id ? (
                     <div className="flex flex-col gap-2">
@@ -151,7 +167,7 @@ export default function UserManagementModal({ isOpen, onClose, adminToken, onRef
                         <option value="graphic-designer">Graphic Designer</option>
                         <option value="marketing-team">Marketing Team</option>
                         <option value="reviewer">Reviewer</option>
-                        <option value="user">User (default)</option>
+                        <option value="user">User (read-only)</option>
                       </select>
                       <input
                         type="password"
@@ -166,7 +182,7 @@ export default function UserManagementModal({ isOpen, onClose, adminToken, onRef
                       </div>
                     </div>
                   ) : (
-                    <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="flex gap-0.5">
                       <button onClick={() => { setEditingId(u.id); setEditRole(u.role); setEditPassword(""); }} className="p-1.5 hover:bg-indigo-50 hover:text-indigo-600 rounded-lg transition-colors text-zinc-300">
                         <Edit3 className="w-3.5 h-3.5" />
                       </button>
@@ -189,7 +205,7 @@ export default function UserManagementModal({ isOpen, onClose, adminToken, onRef
                   <option value="graphic-designer">Graphic Designer</option>
                   <option value="marketing-team">Marketing Team</option>
                   <option value="reviewer">Reviewer</option>
-                  <option value="user">User (default)</option>
+                  <option value="user">User (read-only)</option>
                 </select>
                 <div className="flex gap-2">
                   <button onClick={() => setAdding(false)} className="flex-1 py-2.5 text-sm font-bold text-zinc-500 hover:bg-zinc-100 rounded-xl transition-colors">Cancel</button>

@@ -1,4 +1,4 @@
-export type PostFormat = "image" | "carousel" | "reel";
+export type PostFormat = "image" | "carousel" | "reel" | "story";
 
 export type ClientStatus =
   | "Not Ready for Client"
@@ -13,6 +13,7 @@ export type InternalStatus =
   | "Ready for Client"
   | "Changes Requested"
   | "Approved"
+  | "Ready to Schedule"
   | "Scheduled"
   | "Posted";
 
@@ -31,6 +32,7 @@ export interface Tenant {
 
 export interface Post {
   id: string;
+  tenantId?: string;
   title: string;
   format: PostFormat;
   mediaUrls: string[];
@@ -56,11 +58,13 @@ export interface Post {
   internalTasks: Task[];
 
   // Workflow
-  scheduledAt?: string;
+  scheduledAt?: string | null;
   revisionCount?: number;
-  publishedAt?: string;
-  archivedAt?: string;
+  publishedAt?: string | null;
+  archivedAt?: string | null;
   dueDate?: string;
+  script?: string;
+  sortOrder?: number;
 }
 
 export interface Comment {

@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { X, Plus, Trash2, Save, ShieldCheck, Upload } from "lucide-react";
+import { X, Plus, Trash2, Save, ShieldCheck } from "lucide-react";
 import ConfirmDialog from "./ConfirmDialog";
 import { useToast } from "./Toast";
+import { staffUploadHeaders } from "../mediaUpload";
 
 interface Tenant {
     id: string;
@@ -58,7 +59,7 @@ export default function TenantManagerModal({ isOpen, onClose, tenants, onUpsert,
         try {
             const formData = new FormData();
             formData.append("file", file);
-            const res = await fetch("/api/upload", { method: "POST", body: formData });
+            const res = await fetch("/api/upload", { method: "POST", body: formData, credentials: "include", headers: staffUploadHeaders() });
             if (!res.ok) {
                 const errData = await res.json().catch(() => ({}));
                 throw new Error(errData.error || "Upload failed");
@@ -75,7 +76,7 @@ export default function TenantManagerModal({ isOpen, onClose, tenants, onUpsert,
 
     const save = () => {
         if (!form.id.trim() || !form.name.trim()) {
-            toastError("Unique Slug and Brand Name are required");
+            toastError("Workspace URL and client or brand name are required");
             return;
         }
         onUpsert(form);
@@ -112,25 +113,25 @@ export default function TenantManagerModal({ isOpen, onClose, tenants, onUpsert,
                                         <ShieldCheck className="w-5 h-5 text-white" />
                                     </div>
                                     <div>
-                                        <h2 className="text-lg font-bold text-zinc-900">Client Management</h2>
-                                        <p className="text-xs text-zinc-500">Configure client brands and workspaces</p>
+                                         <h2 className="text-lg font-bold text-zinc-900">Client profiles</h2>
+                                         <p className="text-xs text-zinc-500">Manage the details clients see in Review Room</p>
                                     </div>
                                 </div>
-                                <button onClick={onClose} className="p-2 hover:bg-zinc-100 rounded-full transition-colors">
+                                         <button type="button" onClick={onClose} aria-label="Close client profiles" className="p-2 hover:bg-zinc-100 rounded-full transition-colors">
                                     <X className="w-5 h-5 text-zinc-400" />
                                 </button>
                             </div>
 
-                            <div className="flex-1 overflow-auto p-6 flex gap-6">
+                            <div className="flex-1 overflow-hidden p-6 flex gap-6 min-h-0">
                                 {/* Tenants list */}
-                                <div className="w-1/2 space-y-2">
-                                    <div className="flex items-center justify-between mb-3 px-1">
-                                        <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider">All Clients</span>
+                                <div className="w-1/2 flex flex-col min-h-0">
+                                    <div className="flex items-center justify-between mb-3 px-1 shrink-0">
+                                         <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Client profiles</span>
                                         <button onClick={startNew} className="text-xs font-bold text-indigo-600 hover:text-indigo-700 flex items-center gap-1">
                                             <Plus className="w-3 h-3" /> Add New
                                         </button>
                                     </div>
-                                    <div className="space-y-1">
+                                    <div className="space-y-1 flex-1 overflow-y-auto min-h-0 pr-1">
                                         {tenants.map((t) => (
                                             <button
                                                 key={t.id}
@@ -157,15 +158,15 @@ export default function TenantManagerModal({ isOpen, onClose, tenants, onUpsert,
                                 </div>
 
                                 {/* Edit form */}
-                                <div className="w-1/2 bg-zinc-50 rounded-2xl p-5 border border-zinc-100">
+                                <div className="w-1/2 bg-zinc-50 rounded-2xl p-5 border border-zinc-100 overflow-y-auto min-h-0">
                                     {editingId ? (
                                         <div className="space-y-4">
                                             <h3 className="text-sm font-bold text-zinc-900">
-                                                {editingId === "new" ? "Create New Brand" : "Edit Brand Settings"}
+                                                 {editingId === "new" ? "Create client profile" : "Edit client profile"}
                                             </h3>
 
                                             <div>
-                                                <label className="block text-[10px] font-bold text-zinc-400 uppercase mb-1.5 ml-1">Unique Slug (ID)</label>
+                                                 <label className="block text-[10px] font-bold text-zinc-400 uppercase mb-1.5 ml-1">Workspace URL</label>
                                                 <input
                                                     disabled={editingId !== "new"}
                                                     value={form.id}
@@ -174,12 +175,12 @@ export default function TenantManagerModal({ isOpen, onClose, tenants, onUpsert,
                                                     placeholder="e.g. apple-inc"
                                                 />
                                                 {editingId === "new" && (
-                                                    <p className="text-[10px] text-zinc-400 mt-1 ml-1">Lowercase letters, numbers, and hyphens only. Cannot be changed later.</p>
+                                                     <p className="text-[10px] text-zinc-400 mt-1 ml-1">The client uses this in their workspace URL. Lowercase letters, numbers, and hyphens only. Cannot be changed later.</p>
                                                 )}
                                             </div>
 
                                             <div>
-                                                <label className="block text-[10px] font-bold text-zinc-400 uppercase mb-1.5 ml-1">Brand Name</label>
+                                                 <label className="block text-[10px] font-bold text-zinc-400 uppercase mb-1.5 ml-1">Client or brand name</label>
                                                 <input
                                                     value={form.name}
                                                     onChange={(e) => setForm({ ...form, name: e.target.value })}
@@ -189,7 +190,7 @@ export default function TenantManagerModal({ isOpen, onClose, tenants, onUpsert,
                                             </div>
 
                                             <div>
-                                                <label className="block text-[10px] font-bold text-zinc-400 uppercase mb-1.5 ml-1">Profile Picture (Logo)</label>
+                                                 <label className="block text-[10px] font-bold text-zinc-400 uppercase mb-1.5 ml-1">Client logo</label>
                                                 <div className="flex items-start gap-4">
                                                     <img
                                                         src={form.logoUrl}
@@ -215,12 +216,12 @@ export default function TenantManagerModal({ isOpen, onClose, tenants, onUpsert,
                                             </div>
 
                                             <div>
-                                                <label className="block text-[10px] font-bold text-zinc-400 uppercase mb-1.5 ml-1">Client Bio</label>
+                                                 <label className="block text-[10px] font-bold text-zinc-400 uppercase mb-1.5 ml-1">Client description</label>
                                                 <textarea
                                                     value={form.bio}
                                                     onChange={(e) => setForm({ ...form, bio: e.target.value })}
                                                     className="w-full px-3 py-2 bg-white border border-zinc-200 rounded-lg text-sm text-zinc-900 placeholder:text-zinc-400 focus:ring-2 focus:ring-indigo-500 min-h-[80px] resize-none"
-                                                    placeholder="Brief description of the client/brand…"
+                                                     placeholder="A short description of this client or brand…"
                                                 />
                                             </div>
 
@@ -230,7 +231,7 @@ export default function TenantManagerModal({ isOpen, onClose, tenants, onUpsert,
                                                     disabled={!form.id.trim() || !form.name.trim()}
                                                     className="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white py-2 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-colors shadow-sm active:scale-95"
                                                 >
-                                                    <Save className="w-4 h-4" /> Save Changes
+                                                     <Save className="w-4 h-4" /> Save profile
                                                 </button>
                                                 {editingId !== "new" && (
                                                     <button
@@ -248,7 +249,7 @@ export default function TenantManagerModal({ isOpen, onClose, tenants, onUpsert,
                                             <div className="w-12 h-12 rounded-full bg-zinc-200 flex items-center justify-center mb-3">
                                                 <ShieldCheck className="w-6 h-6 text-zinc-400" />
                                             </div>
-                                            <p className="text-sm font-semibold text-zinc-400">Select a client to manage their settings</p>
+                                             <p className="text-sm font-semibold text-zinc-400">Select a client to manage their profile</p>
                                         </div>
                                     )}
                                 </div>

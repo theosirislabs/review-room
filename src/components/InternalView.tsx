@@ -1,4 +1,5 @@
-import React, { useState, useMemo, useCallback, useEffect } from "react";
+import React, { useState, useMemo, useCallback, useEffect, useRef, lazy, Suspense } from "react";
+import { Badge } from "./ui/Badge";
 import { Post, InternalStatus, ClientStatus, TeamMember } from "../types";
 import { motion, AnimatePresence } from "motion/react";
 import {
@@ -7,22 +8,28 @@ import {
   CheckCircle2, CheckSquare, MessageSquare, Tag,
   Link, Layout, Lock, Copy, Settings, Share2,
   AlertCircle, Play, Send, Zap, Image as ImageIcon, Camera, Loader2,
-  Calendar, BarChart2, Flag, GitBranch, Clock, ChevronDown, Sun, Moon, Archive, RotateCcw
+  Calendar, BarChart2, Flag, GitBranch, Clock, ChevronDown, Sun, Moon, Archive, RotateCcw, RectangleVertical, Megaphone, Eye
 } from "lucide-react";
-import PostFormModal from "./PostFormModal";
 import ConfirmDialog from "./ConfirmDialog";
 import TenantManagerModal from "./TenantManagerModal";
-import BatchUploadModal from "./BatchUploadModal";
-import CampaignManagerModal from "./CampaignManagerModal";
+import UpdatesModal from "./UpdatesModal";
 import CalendarView from "./CalendarView";
-import AnalyticsView from "./AnalyticsView";
 import { useToast } from "./Toast";
-import { isVideo, fallbackSvg, parseDateSafe, shouldRenderAsVideo } from "../utils";
+import { fallbackSvg, parseDateSafe, shouldRenderAsVideo, tileAspectClass, dateOnly, isOverdue } from "../utils";
+import { staffUploadHeaders } from "../mediaUpload";
 import { createAndCopyClientPostShare } from "../clientPostShare";
 import { createShareSetLink } from "../shareSet";
+import { readReviewerPreference, normalizeReviewerName } from "../reviewerProfile";
+import ShareClientLinkModal from "./ShareClientLinkModal";
 import { useTheme } from "../theme";
+import { schedulingPatchForPost } from "../agencyCalendar";
+import { normalizeGlobalOverviewStats, type GlobalOverviewCard, type GlobalStatsTenant } from "../globalStats";
 import OsirisLogo from "./OsirisLogo";
-type AgencyRole = "super-admin" | "graphic-designer" | "marketing-team" | "reviewer";
+
+const AnalyticsView = lazy(() => import("./AnalyticsView"));
+const PostFormModal = lazy(() => import("./PostFormModal"));
+const BatchUploadModal = lazy(() => import("./BatchUploadModal"));
+const CampaignManagerModal = lazy(() => import("./CampaignManagerModal"));
 
 interface Props {
   posts: Post[];
@@ -32,7 +39,7 @@ interface Props {
   adminToken?: string;
   currentUser?: { id: string; username: string; role: string } | null;
   teamMembers?: TeamMember[];
-  onSwitchTenant: (id: string) => void;
+  onSwitchTenant: (id: string, mode?: "internal" | "client", token?: string) => void;
   onUpdatePost: (post: Post) => void;
   onAddComment: (postId: string, comment: any) => void;
   onDeleteComment: (postId: string, commentId: string) => void;
@@ -45,23 +52,37 @@ interface Props {
   onUpsertTenant: (tenant: any) => void;
   onDeleteTenant: (id: string) => void;
   onCopyShareLink: () => void;
-  emit?: (event: string, data: any) => void;
+  onPreviewClient: () => void;
+  emit?: (event: string, data: any, callback?: (result: any) => void) => void;
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  Concept: "bg-zinc-100 text-zinc-600 border-zinc-200",
-  Draft: "bg-blue-50 text-blue-700 border-blue-200",
-  "Internal QA": "bg-amber-50 text-amber-700 border-amber-200",
-  "Ready for Client": "bg-indigo-50 text-indigo-700 border-indigo-200",
-  "Changes Requested": "bg-red-50 text-red-700 border-red-200",
-  Approved: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  "Ready to Schedule": "bg-purple-50 text-purple-700 border-purple-200",
-  Scheduled: "bg-purple-50 text-purple-700 border-purple-200",
-  Posted: "bg-zinc-900 text-white border-zinc-800",
-};
 
 /** Normalise a hashtag token so it always has exactly one leading # */
 const normaliseTag = (t: string) => t.startsWith("#") ? t : `#${t}`;
+
+const WORKFLOW_COLUMNS: { id: string; label: string; statuses: InternalStatus[] }[] = [
+  { id: "drafts", label: "Drafts", statuses: ["Concept", "Draft"] },
+  { id: "internal", label: "Internal Review", statuses: ["Internal QA"] },
+   { id: "client", label: "With Client", statuses: ["Ready for Client"] },
+   { id: "changes", label: "Changes Requested", statuses: ["Changes Requested"] },
+   { id: "live", label: "Approved & Publishing", statuses: ["Approved", "Ready to Schedule", "Scheduled", "Posted"] },
+];
+
+function dropStatusForColumn(colId: string): { internalStatus: InternalStatus; clientStatus?: ClientStatus } {
+  if (colId === "drafts") return { internalStatus: "Draft", clientStatus: "Not Ready for Client" };
+  if (colId === "internal") return { internalStatus: "Internal QA", clientStatus: "Not Ready for Client" };
+  if (colId === "client") return { internalStatus: "Ready for Client", clientStatus: "Needs Your Review" };
+  if (colId === "changes") return { internalStatus: "Changes Requested", clientStatus: "Changes Requested" };
+  return { internalStatus: "Approved", clientStatus: "Approved" };
+}
+
+function statusVariant(status: string): "success" | "danger" | "warning" | "info" | "neutral" {
+  if (status === "Changes Requested") return "danger";
+  if (status === "Approved" || status === "Posted") return "success";
+  if (status === "Internal QA") return "warning";
+  if (status === "Ready for Client" || status === "Ready to Schedule" || status === "Scheduled") return "info";
+  return "neutral";
+}
 
 const canCreateEdit = (role: string) => ["super-admin", "graphic-designer"].includes(role);
 const canSchedulePost = (role: string) => ["super-admin", "marketing-team"].includes(role);
@@ -87,18 +108,21 @@ function clientStatusForInternalChange(next: InternalStatus): ClientStatus | und
 export default function InternalView({
   posts, tenantId: _tenantId, brandName, tenants, adminToken = "", currentUser, teamMembers = [],
   onSwitchTenant: _onSwitchTenant, onUpdatePost, onAddComment, onDeleteComment, onAddTask, onDeleteTask, onToggleTask,
-  onCreatePost, onCreatePostsBulk, onDeletePost, onUpsertTenant, onDeleteTenant, onCopyShareLink, emit
+  onCreatePost, onCreatePostsBulk, onDeletePost, onUpsertTenant, onDeleteTenant, onCopyShareLink: _onCopyShareLink, onPreviewClient, emit
 }: Props) {
-  const role = currentUser?.role || "graphic-designer";
+  // Logged-in staff with a missing role must not inherit designer write access.
+  // Internal magic-link sessions (no agency login) keep the historic designer default.
+  const role = currentUser?.role || (adminToken ? "user" : "graphic-designer");
   const isSuperAdmin = role === "super-admin";
   const { theme, toggleTheme } = useTheme();
-  const canCreate = canCreateEdit(role);
-  const canSchedule = canSchedulePost(role);
-  const canReviewContent = canReview(role);
+   const canCreate = canCreateEdit(role);
+   const canSchedule = canSchedulePost(role);
+   const canReviewContent = canReview(role);
+   const canMovePosts = canCreate || canReviewContent || canSchedule;
   // ── Selections & UI state ─────────────────────────────────────
   const [activePostId, setActivePostId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [activeTab, setActiveTab] = useState<"all" | "blocked" | "needs-qa" | "client-changes" | "archived">("all");
+  const [activeTab, setActiveTab] = useState<"workflow" | "blocked" | "archived">("workflow");
   const [viewMode, setViewMode] = useState<"grid" | "calendar" | "analytics">("grid");
   const [search, setSearch] = useState("");
   const [campaignFilter, setCampaignFilter] = useState("");
@@ -110,13 +134,43 @@ export default function InternalView({
   const [showTenantModal, setShowTenantModal] = useState(false);
   const [showBatchModal, setShowBatchModal] = useState(false);
   const [showCampaignModal, setShowCampaignModal] = useState(false);
+  const [showUpdatesModal, setShowUpdatesModal] = useState(false);
+  const [unreadUpdates, setUnreadUpdates] = useState(0);
   const [showShareModal, setShowShareModal] = useState(false);
   const [editingPost, setEditingPost] = useState<Post | null>(null);
+  const [calendarDraftDate, setCalendarDraftDate] = useState<string | undefined>();
+  const [workspacePillars, setWorkspacePillars] = useState<string[]>([]);
+  const [workspaceCampaigns, setWorkspaceCampaigns] = useState<{ code: string; name: string }[]>([]);
   const [activeImageIdx, setActiveImageIdx] = useState(0);
   const [clientSwitcherOpen, setClientSwitcherOpen] = useState(false);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const draggingIdRef = useRef<string | null>(null);
+   const [colShown, setColShown] = useState<Record<string, number>>({});
+   const [listShown, setListShown] = useState(24);
+   const detailDialogRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setColShown({});
+    setListShown(24);
+  }, [activeTab, search, campaignFilter]);
+
+  useEffect(() => {
+    if (!adminToken || !currentUser) return;
+    fetch("/api/updates/unread-count", { headers: { Authorization: `Bearer ${adminToken}` } })
+      .then((r) => (r.ok ? r.json() : { count: 0 }))
+      .then((d) => {
+        const n = Number(d.count) || 0;
+        setUnreadUpdates(n);
+        if (n > 0 && sessionStorage.getItem("rr_updates_prompted") !== "1") {
+          sessionStorage.setItem("rr_updates_prompted", "1");
+          setShowUpdatesModal(true);
+        }
+      })
+      .catch(() => {});
+  }, [adminToken, currentUser]);
 
   // ── Global Stats ──────────────────────────────────────────────
-  const [globalStats, setGlobalStats] = useState<any[]>([]);
+  const [globalStats, setGlobalStats] = useState<GlobalOverviewCard[]>([]);
   const [showGlobalOverview, setShowGlobalOverview] = useState(false);
 
   useEffect(() => {
@@ -124,11 +178,28 @@ export default function InternalView({
       fetch("/api/stats", {
         headers: { Authorization: `Bearer ${adminToken}` }
       })
-        .then(res => res.json())
-        .then(data => setGlobalStats(data.perTenant || []))
+        .then(res => res.ok ? res.json() : { perTenant: [] })
+        .then(data => setGlobalStats(normalizeGlobalOverviewStats(Array.isArray(data?.perTenant) ? data.perTenant as GlobalStatsTenant[] : [])))
         .catch(console.error);
     }
   }, [showGlobalOverview, adminToken]);
+
+  const refreshWorkspaceCatalog = useCallback(() => {
+    if (!_tenantId || !adminToken) return;
+    const headers = { Authorization: `Bearer ${adminToken}` };
+    fetch(`/api/pillars?tenantId=${encodeURIComponent(_tenantId)}`, { headers, credentials: "include" })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows: any[]) => setWorkspacePillars(Array.isArray(rows) ? rows.map((x) => x.name).filter(Boolean) : []))
+      .catch(() => { /* keep fallback pillars */ });
+    fetch(`/api/campaigns?tenantId=${encodeURIComponent(_tenantId)}`, { headers, credentials: "include" })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows: any[]) => setWorkspaceCampaigns(Array.isArray(rows) ? rows.map((x) => ({ code: x.code, name: x.name })).filter((x) => x.code) : []))
+      .catch(() => { /* keep free-text campaign */ });
+  }, [_tenantId, adminToken]);
+
+  useEffect(() => {
+    refreshWorkspaceCatalog();
+  }, [refreshWorkspaceCatalog]);
 
   // ── Fetch archived posts when activeTab === "archived" ────────
   useEffect(() => {
@@ -158,10 +229,30 @@ export default function InternalView({
 
   const { success, error: toastError } = useToast();
 
+  const updatePostWithScheduling = (
+    post: Post,
+    changes: Partial<Pick<Post, "date" | "time" | "internalStatus">>,
+    extra: Partial<Post> = {},
+  ) => {
+    try {
+      onUpdatePost({ ...post, ...schedulingPatchForPost(post, changes), ...extra });
+      return true;
+    } catch (reason) {
+      toastError(reason instanceof Error ? reason.message : "Use a valid publish date and time before scheduling this post.");
+      return false;
+    }
+  };
+
+  const handleSchedulePost = (post: Post, date: string) => {
+    if (updatePostWithScheduling(post, { date, internalStatus: "Scheduled" })) {
+      success(`Scheduled "${post.title}" for ${date}.`);
+    }
+  };
+
   // ── Active post derived by ID (never by fragile array index) ─
   const activePost = useMemo(
-    () => (activePostId ? posts.find((p) => p.id === activePostId) ?? null : null),
-    [activePostId, posts]
+    () => (activePostId ? posts.find((p) => p.id === activePostId) ?? archivedPosts.find((p) => p.id === activePostId) ?? null : null),
+    [activePostId, posts, archivedPosts]
   );
 
   // ── Keyboard shortcuts ────────────────────────────────────────
@@ -173,7 +264,8 @@ export default function InternalView({
       if (!activePost) return;
       if (e.key === "j" || e.key === "ArrowRight") { e.preventDefault(); handleNext(); }
       if (e.key === "k" || e.key === "ArrowLeft") { e.preventDefault(); handlePrev(); }
-      if (e.key === "e") { 
+      if (e.key === "e") {
+        if (!canCreate) return;
         setEditingPost(activePost); 
         setShowFormModal(true); 
         setActivePostId(null); 
@@ -181,14 +273,51 @@ export default function InternalView({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [activePost, activePostId]);
+  }, [activePost, activePostId, canCreate]);
 
-  // Post-order for prev/next navigation follows the CURRENT filtered list
+   useEffect(() => {
+     if (!activePost) return;
+     const previousActiveElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+     const previousOverflow = document.body.style.overflow;
+     document.body.style.overflow = "hidden";
+     detailDialogRef.current?.focus();
+
+     const trapFocus = (event: KeyboardEvent) => {
+       if (event.key !== "Tab") return;
+       const dialog = detailDialogRef.current;
+       if (!dialog) return;
+       const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(
+         "a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])",
+       ));
+       if (focusable.length === 0) {
+         event.preventDefault();
+         dialog.focus();
+         return;
+       }
+       const first = focusable[0];
+       const last = focusable[focusable.length - 1];
+       const current = document.activeElement;
+       if (event.shiftKey && (current === first || !dialog.contains(current))) {
+         event.preventDefault();
+         last.focus();
+       } else if (!event.shiftKey && (current === last || !dialog.contains(current))) {
+         event.preventDefault();
+         first.focus();
+       }
+     };
+
+     document.addEventListener("keydown", trapFocus);
+     return () => {
+       document.removeEventListener("keydown", trapFocus);
+       document.body.style.overflow = previousOverflow;
+       previousActiveElement?.focus();
+     };
+   }, [activePost?.id]);
+
+   // Post-order for prev/next navigation follows the CURRENT filtered list
   const filteredPosts = useMemo(() => {
     let list = posts;
     if (activeTab === "blocked") list = list.filter((p) => p.isBlocked);
-    else if (activeTab === "needs-qa") list = list.filter((p) => p.internalStatus === "Internal QA");
-    else if (activeTab === "client-changes") list = list.filter((p) => p.internalStatus === "Changes Requested");
 
     if (campaignFilter) list = list.filter(p => p.campaignCode === campaignFilter);
 
@@ -203,7 +332,12 @@ export default function InternalView({
           p.assignee?.toLowerCase().includes(query)
       );
     }
-    return list.sort((a, b) => parseDateSafe(b.date, b.time) - parseDateSafe(a.date, a.time));
+    return [...list].sort((a, b) => {
+      const ao = a.sortOrder ?? 999999;
+      const bo = b.sortOrder ?? 999999;
+      if (ao !== bo) return ao - bo;
+      return parseDateSafe(b.date, b.time) - parseDateSafe(a.date, a.time);
+    });
   }, [posts, activeTab, search, campaignFilter]);
 
   // Unique campaigns for filter
@@ -216,14 +350,21 @@ export default function InternalView({
 
   const copyActivePostClientShare = useCallback(async () => {
     if (!activePost) return;
+    const reviewer = readReviewerPreference(currentUser?.id, _tenantId).name;
+    if (!reviewer) {
+      setShowShareModal(true);
+      toastError("Add a reviewer's name before sharing a client link.");
+      return;
+    }
     const r = await createAndCopyClientPostShare({
       tenantId: _tenantId,
       postId: activePost.id,
       adminToken: adminToken || undefined,
+      reviewerName: reviewer,
     });
     if (r.ok) success("Single-post client link copied.");
     else toastError(r.error);
-  }, [activePost, _tenantId, adminToken, success, toastError]);
+  }, [activePost, _tenantId, adminToken, currentUser?.id, success, toastError]);
 
   // ── Selection helpers ─────────────────────────────────────────
   const toggleSelect = useCallback((id: string, e?: React.MouseEvent) => {
@@ -270,22 +411,23 @@ export default function InternalView({
   };
 
   const handleBulkStatusChange = (status: InternalStatus) => {
+    let changed = 0;
     selectedIds.forEach((id) => {
       const post = posts.find((p) => p.id === id);
       if (post) {
         const cs = clientStatusForInternalChange(status);
-        onUpdatePost({ ...post, internalStatus: status, ...(cs !== undefined ? { clientStatus: cs } : {}) });
+        if (updatePostWithScheduling(post, { internalStatus: status }, cs !== undefined ? { clientStatus: cs } : {})) changed += 1;
       }
     });
     clearSelection();
-    success(`Updated ${selectedIds.size} posts to "${status}"`);
+    if (changed > 0) success(`Updated ${changed} post${changed === 1 ? "" : "s"} to "${status}"`);
   };
 
   const handlePushToReview = () => {
     openConfirm({
-      title: "Push to Review",
-      message: `Send ${selectedIds.size} post${selectedIds.size > 1 ? "s" : ""} to the client? This will set status to "Ready for Client".`,
-      confirmLabel: "Push to Client",
+       title: "Send for client review",
+       message: `Send ${selectedIds.size} post${selectedIds.size > 1 ? "s" : ""} for client review? This will set the status to "Ready for Client".`,
+       confirmLabel: "Send for review",
       onConfirm: () => {
         selectedIds.forEach((id) => {
           const post = posts.find((p) => p.id === id);
@@ -298,14 +440,20 @@ export default function InternalView({
           }
         });
         clearSelection();
-        success(`${selectedIds.size} posts sent to client`);
+         success(`${selectedIds.size} posts sent for review`);
       },
     });
   };
 
   const handleShareSelected = async () => {
     const ids = Array.from(selectedIds);
-    const r = await createShareSetLink({ tenantId: _tenantId, postIds: ids, adminToken });
+    const reviewer = normalizeReviewerName(readReviewerPreference(currentUser?.id, _tenantId).name);
+    if (!reviewer) {
+      setShowShareModal(true);
+      toastError("Add a reviewer's name before sharing selected posts.");
+      return;
+    }
+    const r = await createShareSetLink({ tenantId: _tenantId, postIds: ids, adminToken, reviewerName: reviewer });
     if (r.ok) {
       success(`Share link for ${ids.length} posts copied to clipboard`);
       clearSelection();
@@ -341,7 +489,7 @@ export default function InternalView({
       const formData = new FormData();
       formData.append("file", file);
 
-      const res = await fetch("/api/upload", { method: "POST", body: formData });
+      const res = await fetch("/api/upload", { method: "POST", body: formData, credentials: "include", headers: staffUploadHeaders() });
       const { url } = await res.json();
 
       onUpdatePost({ ...activePost, thumbnailUrl: url });
@@ -358,6 +506,34 @@ export default function InternalView({
   React.useEffect(() => { setActiveImageIdx(0); }, [activePostId]);
 
   const openPost = (post: Post) => setActivePostId(post.id);
+
+   const handleColumnDrop = (colId: string, targetPostId?: string) => {
+     if (!canMovePosts) return;
+     const id = draggingIdRef.current;
+    if (!id) return;
+    const post = posts.find((p) => p.id === id);
+    draggingIdRef.current = null;
+    setDraggingId(null);
+    if (!post) return;
+    const col = WORKFLOW_COLUMNS.find((c) => c.id === colId)
+      || (colId === "blocked" ? { id: "blocked", label: "Blocked", statuses: ALL_STATUSES } : undefined);
+    if (!col) return;
+    const alreadyIn = col.statuses.includes(post.internalStatus);
+    if (targetPostId === id && alreadyIn) return;
+    const drop = dropStatusForColumn(colId);
+    const colPosts = filteredPosts.filter((p) => col.statuses.includes(p.internalStatus) && p.id !== id);
+    const idx = targetPostId ? colPosts.findIndex((p) => p.id === targetPostId) : -1;
+    const insertAt = idx >= 0 ? idx : colPosts.length;
+    const nextList = [...colPosts];
+    const moved = alreadyIn ? post : { ...post, internalStatus: drop.internalStatus, ...(drop.clientStatus ? { clientStatus: drop.clientStatus } : {}) };
+    nextList.splice(insertAt, 0, moved);
+    nextList.forEach((p, i) => {
+      const statusPatch = p.id === moved.id && !alreadyIn
+        ? { internalStatus: drop.internalStatus, ...(drop.clientStatus ? { clientStatus: drop.clientStatus } : {}) }
+        : {};
+      onUpdatePost({ ...p, ...statusPatch, sortOrder: i + 1 });
+    });
+  };
 
   const handlePrev = () => {
     if (activePostFilteredIdx > 0)
@@ -401,25 +577,27 @@ export default function InternalView({
   };
 
   // ── Stats ─────────────────────────────────────────────────────
-  const stats = {
-    total: posts.length,
-    reviewed: posts.filter((p) => p.internalStatus === "Ready for Client" || p.internalStatus === "Approved").length,
-    blocked: posts.filter((p) => p.isBlocked).length,
-  };
+   const stats = {
+     total: posts.length,
+     needsReview: posts.filter((p) => p.clientStatus === "Needs Your Review").length,
+     blocked: posts.filter((p) => p.isBlocked).length,
+   };
 
-  // ── Comment submit ────────────────────────────────────────────
-  const submitComment = (isInternal: boolean) => {
-    if (!activePost || !newCommentText.trim()) return;
-    onAddComment(activePost.id, {
-      author: isInternal ? "Agency Admin" : "Agency Admin",
-      text: newCommentText.trim(),
-      isInternalOnly: isInternal,
-      timestamp: new Date().toISOString(),
-    });
-    setNewCommentText("");
-  };
+   // ── Comment submit ────────────────────────────────────────────
+   const submitComment = (isInternal: boolean) => {
+     if (!activePost || !newCommentText.trim()) return;
+     onAddComment(activePost.id, {
+       author: currentUser?.username || "Agency",
+       text: newCommentText.trim(),
+       isInternalOnly: isInternal,
+       timestamp: new Date().toISOString(),
+     });
+     setNewCommentText("");
+   };
 
-  return (
+   const currentTenant = tenants.find((tenant) => tenant.id === _tenantId) || null;
+
+   return (
     <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-8 sm:mb-10">
@@ -487,7 +665,7 @@ export default function InternalView({
             </div>
           </div>
           <h1 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">Review Room</h1>
-          <p className="text-xs text-zinc-500 font-medium pt-0.5">Press <kbd className="bg-zinc-800 px-1.5 py-0.5 rounded text-zinc-300 font-mono">J</kbd>/<kbd className="bg-zinc-800 px-1.5 py-0.5 rounded text-zinc-300 font-mono">K</kbd> to navigate · <kbd className="bg-zinc-800 px-1.5 py-0.5 rounded text-zinc-300 font-mono">E</kbd> edit · <kbd className="bg-zinc-800 px-1.5 py-0.5 rounded text-zinc-300 font-mono">Esc</kbd> close</p>
+          <p className="text-xs text-zinc-500 font-medium pt-0.5">Press <kbd className="bg-zinc-800 px-1.5 py-0.5 rounded text-zinc-300 font-mono">J</kbd>/<kbd className="bg-zinc-800 px-1.5 py-0.5 rounded text-zinc-300 font-mono">K</kbd> to navigate{canCreate ? <> · <kbd className="bg-zinc-800 px-1.5 py-0.5 rounded text-zinc-300 font-mono">E</kbd> edit</> : null} · <kbd className="bg-zinc-800 px-1.5 py-0.5 rounded text-zinc-300 font-mono">Esc</kbd> close</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 sm:gap-3">
@@ -497,16 +675,18 @@ export default function InternalView({
               const icons = { grid: Grid3X3, calendar: Calendar, analytics: BarChart2 };
               const Icon = icons[v];
               return (
-                <button key={v} onClick={() => { setViewMode(v); setShowGlobalOverview(false); }} title={v.charAt(0).toUpperCase() + v.slice(1)}
-                  className={`p-2 rounded-lg transition-all ${viewMode === v && !showGlobalOverview ? "bg-white shadow-sm text-zinc-900" : "text-zinc-400 hover:text-zinc-600"}`}>
+                 <button key={v} onClick={() => { setViewMode(v); setShowGlobalOverview(false); }} title={v.charAt(0).toUpperCase() + v.slice(1)} aria-label={`${v.charAt(0).toUpperCase() + v.slice(1)} view`} aria-pressed={viewMode === v && !showGlobalOverview}
+                   className={`p-2 rounded-lg transition-all ${viewMode === v && !showGlobalOverview ? "bg-white shadow-sm text-zinc-900" : "text-zinc-400 hover:text-zinc-600"}`}>
                   <Icon className="w-4 h-4" />
                 </button>
               );
             })}
             <button
               onClick={() => setShowGlobalOverview(!showGlobalOverview)}
-              className={`p-2 rounded-lg transition-all ${showGlobalOverview ? "bg-white shadow-sm text-zinc-900" : "text-zinc-400 hover:text-zinc-600"}`}
-              title="Global Overview"
+               className={`p-2 rounded-lg transition-all ${showGlobalOverview ? "bg-white shadow-sm text-zinc-900" : "text-zinc-400 hover:text-zinc-600"}`}
+               title="Global Overview"
+               aria-label="Global Overview"
+               aria-pressed={showGlobalOverview}
             >
               <Layout className="w-4 h-4" />
             </button>
@@ -521,9 +701,17 @@ export default function InternalView({
               className="w-full pl-10 pr-4 py-2.5 bg-white border border-zinc-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all shadow-sm"
             />
           </div>
-          <button onClick={() => setShowShareModal(true)} className="flex items-center gap-2 bg-white border border-zinc-200 hover:border-zinc-300 text-zinc-700 px-4 py-2.5 rounded-xl text-sm font-bold transition-all shadow-sm active:scale-95">
-            <Link className="w-4 h-4" /> <span className="hidden sm:inline">Share Links</span>
+          <button
+             onClick={onPreviewClient}
+             className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-xl text-sm font-bold transition-all shadow-sm active:scale-95"
+             title="Preview the client-facing profile"
+             aria-label="Preview client view"
+          >
+            <Eye className="w-4 h-4" /> <span className="hidden sm:inline">Preview client view</span>
           </button>
+           <button onClick={() => setShowShareModal(true)} className="flex items-center gap-2 bg-white border border-zinc-200 hover:border-zinc-300 text-zinc-700 px-4 py-2.5 rounded-xl text-sm font-bold transition-all shadow-sm active:scale-95" aria-label="Share client review links">
+             <Link className="w-4 h-4" /> <span className="hidden sm:inline">Share links</span>
+           </button>
           <button
             onClick={toggleTheme}
             className="flex items-center gap-2 bg-white border border-zinc-200 hover:border-zinc-300 text-zinc-700 px-3 py-2.5 rounded-xl text-sm font-bold transition-all shadow-sm active:scale-95"
@@ -531,6 +719,23 @@ export default function InternalView({
           >
             {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
           </button>
+          {adminToken && currentUser && (
+            <button
+              onClick={() => setShowUpdatesModal(true)}
+              className="relative flex items-center gap-2 bg-white border border-zinc-200 hover:border-zinc-300 text-zinc-700 px-3 py-2.5 rounded-xl text-sm font-bold transition-all shadow-sm active:scale-95"
+              title="What's new"
+            >
+              <Megaphone className="w-4 h-4" />
+              {unreadUpdates > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-indigo-600 text-white text-[9px] font-black flex items-center justify-center">{unreadUpdates}</span>
+              )}
+            </button>
+          )}
+          {currentUser?.username && (
+            <span className="hidden sm:inline text-[10px] font-black uppercase tracking-widest text-zinc-500 px-2.5 py-2 rounded-xl bg-white border border-zinc-200 max-w-[180px] truncate" title={currentUser.username}>
+              {currentUser.username.split("@")[0]}
+            </span>
+          )}
           <button onClick={() => setShowCampaignModal(true)} className="flex items-center gap-2 bg-white border border-zinc-200 hover:border-zinc-300 text-zinc-700 px-3 py-2.5 rounded-xl text-sm font-bold transition-all shadow-sm active:scale-95" title="Campaigns">
             <Flag className="w-4 h-4" /> <span className="hidden sm:inline">Campaigns</span>
           </button>
@@ -583,14 +788,27 @@ export default function InternalView({
       {/* Calendar View */}
       {viewMode === "calendar" && !showGlobalOverview && (
         <div className="mb-8">
-          <CalendarView posts={posts} onOpenPost={(post) => { setViewMode("grid"); setActivePostId(post.id); }} />
+          <CalendarView
+            posts={filteredPosts}
+            onOpenPost={(post) => setActivePostId(post.id)}
+            onCreatePostForDate={(date) => {
+              setEditingPost(null);
+              setCalendarDraftDate(date);
+              setShowFormModal(true);
+            }}
+            onSchedulePost={handleSchedulePost}
+            canCreate={canCreate}
+            canSchedule={canSchedule}
+          />
         </div>
       )}
 
       {/* Analytics View */}
-      {viewMode === "analytics" && (
+      {viewMode === "analytics" && !showGlobalOverview && (
         <div className="mb-8">
-          <AnalyticsView tenantId={_tenantId} adminToken={adminToken} brandName={brandName} />
+          <Suspense fallback={<div role="status" className="rounded-2xl border border-zinc-200 bg-white p-8 text-sm text-zinc-500">Loading analytics…</div>}>
+            <AnalyticsView tenantId={_tenantId} adminToken={adminToken} brandName={brandName} />
+          </Suspense>
         </div>
       )}
 
@@ -599,16 +817,15 @@ export default function InternalView({
         <div className="flex flex-wrap items-center gap-2 mb-6">
           <div className="flex items-center gap-1 bg-zinc-100 p-1 rounded-2xl">
             {[
-              { id: "all", label: "All Posts" },
+              { id: "workflow", label: "Workflow" },
               { id: "blocked", label: "Blocked" },
-              { id: "needs-qa", label: "Needs QA" },
-              { id: "client-changes", label: "Client Changes" },
               { id: "archived", label: "Archived" },
             ].map((tab) => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id as any)}
-                className={`px-3 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all ${activeTab === tab.id ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-500 hover:text-zinc-700"}`}
+                 onClick={() => setActiveTab(tab.id as any)}
+                 aria-pressed={activeTab === tab.id}
+                 className={`px-3 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all ${activeTab === tab.id ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-500 hover:text-zinc-700"}`}
               >
                 {tab.label}
               </button>
@@ -632,9 +849,9 @@ export default function InternalView({
         {activeTab !== "archived" ? (<>
         <div className="flex flex-wrap items-center gap-3 sm:gap-6 mb-4 sm:mb-5 px-1" id="stats-bar">
           {[
-            { label: "Total Posts", value: stats.total, color: "text-zinc-900" },
-            { label: "Client Ready", value: stats.reviewed, color: "text-indigo-600" },
-            { label: "Blocked Assets", value: stats.blocked, color: "text-red-600" },
+             { label: "Total Posts", value: stats.total, color: "text-zinc-900" },
+             { label: "Needs review", value: stats.needsReview, color: "text-indigo-600" },
+             { label: "Blocked Assets", value: stats.blocked, color: "text-red-600" },
           ].map((s) => (
             <div key={s.label} className="flex items-center gap-1.5 sm:gap-2">
               <span className={`text-lg sm:text-xl font-bold ${s.color}`}>{s.value}</span>
@@ -651,7 +868,7 @@ export default function InternalView({
                   <Zap className="w-3.5 h-3.5" /> Bulk Upload
                 </button>
                 <button
-                  onClick={() => { setEditingPost(null); setShowFormModal(true); }}
+                  onClick={() => { setEditingPost(null); setCalendarDraftDate(undefined); setShowFormModal(true); }}
                   className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition-all shadow-lg shadow-indigo-100 h-9"
                 >
                   <Plus className="w-4 h-4" /> New Post
@@ -661,28 +878,62 @@ export default function InternalView({
           </div>
         </div>
 
-        {filteredPosts.length === 0 && (
+        {filteredPosts.length === 0 ? (
           <div className="text-center py-20 text-zinc-400 bg-white rounded-3xl border border-zinc-100 shadow-sm">
             <Grid3X3 className="w-10 h-10 mx-auto mb-3 opacity-20" />
-            <p className="text-base font-medium">No posts found</p>
+            <p className="text-base font-medium">{activeTab === "blocked" ? "Nothing blocked" : "No posts found"}</p>
             <p className="text-sm mt-1">{search ? `No results for "${search}"` : "This view is empty"}</p>
           </div>
-        )}
-
-        {/* Post Grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 sm:gap-6">
-          {filteredPosts.map((post) => (
+        ) : (
+        <div className="flex gap-3 overflow-x-auto pb-6 items-start snap-x snap-mandatory">
+          {(activeTab === "blocked"
+            ? [{ id: "blocked", label: "Blocked", statuses: ALL_STATUSES }]
+            : WORKFLOW_COLUMNS
+          ).map((col) => {
+            const colPosts = filteredPosts.filter((p) => col.statuses.includes(p.internalStatus));
+            const cap = colShown[col.id] ?? 12;
+            const visible = colPosts.slice(0, cap);
+            return (
+            <div
+              key={col.id}
+              className={`${activeTab === "blocked" ? "w-full max-w-xl" : "w-[240px] sm:w-[260px]"} shrink-0 bg-zinc-50/90 rounded-2xl border border-zinc-100 p-2 min-h-[36vh] snap-start`}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => { e.preventDefault(); handleColumnDrop(col.id); }}
+            >
+              <div className="flex items-center justify-between px-2 py-2 mb-1">
+                <h3 className="text-[10px] font-black uppercase tracking-widest text-zinc-500">{col.label}</h3>
+                <span className="text-[10px] font-bold text-zinc-400">{colPosts.length}</span>
+              </div>
+              <div className="space-y-3 max-h-[calc(100vh-280px)] overflow-y-auto pr-0.5">
+          {visible.map((post) => (
             <div
               key={post.id}
+               draggable={canMovePosts}
+               onDragStart={(e) => {
+                const t = e.target as HTMLElement;
+                if (t.closest("button,input,textarea,select,a")) {
+                  e.preventDefault();
+                  return;
+                }
+                e.stopPropagation();
+                draggingIdRef.current = post.id;
+                setDraggingId(post.id);
+              }}
+              onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+              onDrop={(e) => { e.preventDefault(); e.stopPropagation(); handleColumnDrop(col.id, post.id); }}
+              onDragEnd={() => {
+                setDraggingId(null);
+                setTimeout(() => { draggingIdRef.current = null; }, 80);
+              }}
               onClick={() => openPost(post)}
-              className={`bg-white rounded-xl border-2 overflow-hidden shadow-sm transition-all cursor-pointer group flex flex-col relative ${selectedIds.has(post.id) ? "border-indigo-500 ring-4 ring-indigo-50" : "border-zinc-200 hover:shadow-md hover:border-zinc-300"}`}
+              className={`bg-white rounded-xl border-2 overflow-hidden shadow-sm transition-all cursor-pointer group flex flex-col relative ${selectedIds.has(post.id) ? "border-indigo-500 ring-4 ring-indigo-50" : "border-zinc-200 hover:shadow-md hover:border-zinc-300"} ${draggingId === post.id ? "opacity-60" : ""}`}
             >
               {/* Checkbox */}
               <button
                 onClick={(e) => toggleSelect(post.id, e)}
                 className={`absolute top-3 left-3 z-20 w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all ${selectedIds.has(post.id)
                   ? "bg-indigo-600 border-indigo-600 text-white"
-                  : "bg-white/80 backdrop-blur border-zinc-300 opacity-0 group-hover:opacity-100 shadow-sm"
+                  : "bg-white/80 backdrop-blur border-zinc-300 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 shadow-sm"
                   }`}
                 aria-label={`Select ${post.title}`}
               >
@@ -690,7 +941,7 @@ export default function InternalView({
               </button>
 
               {/* Thumbnail */}
-              <div className="relative aspect-[4/5] bg-zinc-100 overflow-hidden shrink-0">
+              <div className={`relative ${tileAspectClass(post.format)} bg-zinc-100 overflow-hidden shrink-0`}>
                 {(post.thumbnailUrl || (post.mediaUrls && post.mediaUrls[0])) ? (
                   post.thumbnailUrl ? (
                     <img src={post.thumbnailUrl} alt={post.title} onError={(e) => { e.currentTarget.src = fallbackSvg; }} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
@@ -724,6 +975,7 @@ export default function InternalView({
                     {post.format === "carousel" && <Copy className="w-3.5 h-3.5" />}
                     {post.format === "reel" && <Play className="w-3.5 h-3.5 fill-current" />}
                     {post.format === "image" && <ImageIcon className="w-3.5 h-3.5" />}
+                    {post.format === "story" && <RectangleVertical className="w-3.5 h-3.5" />}
                   </div>
                   {post.mediaUrls.length > 1 && (
                     <div className="bg-black/50 text-white text-[10px] px-1.5 py-0.5 rounded font-bold">{post.mediaUrls.length}</div>
@@ -772,17 +1024,22 @@ export default function InternalView({
                 <h3 className="font-bold text-sm text-zinc-900 line-clamp-2 mb-2 leading-tight">{post.title}</h3>
                 <div className="mt-auto pt-2 border-t border-zinc-50 flex items-center justify-between gap-1">
                   <div className="flex items-center gap-1.5 min-w-0">
-                    <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border inline-block shrink-0 ${STATUS_COLORS[post.internalStatus] || STATUS_COLORS.Draft}`}>
+                    <Badge variant={statusVariant(post.internalStatus)} className="shrink-0">
                       {post.internalStatus}
-                    </span>
+                    </Badge>
+                    {post.campaignCode && (
+                      <span className="flex items-center gap-0.5 text-[9px] font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200 shrink-0 max-w-[90px] truncate" title={post.campaignCode}>
+                        <Tag className="w-2.5 h-2.5" />{post.campaignCode}
+                      </span>
+                    )}
                     {(post.revisionCount ?? 0) > 0 && (
                       <span className="flex items-center gap-0.5 text-[9px] font-black text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 shrink-0" title={`${post.revisionCount} revision${(post.revisionCount ?? 0) > 1 ? "s" : ""}`}>
                         <GitBranch className="w-2.5 h-2.5" />v{(post.revisionCount ?? 0) + 1}
                       </span>
                     )}
-                    {post.dueDate && new Date(post.dueDate) < new Date() && !["Approved", "Posted", "Scheduled"].includes(post.internalStatus) && (
-                      <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border border-red-300 text-red-600 bg-red-50 shrink-0 flex items-center gap-1">
-                        <Clock className="w-3 h-3" /> OVERDUE
+                    {post.dueDate && (
+                      <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border shrink-0 flex items-center gap-1 ${isOverdue(post.dueDate) && !["Approved", "Posted", "Scheduled"].includes(post.internalStatus) ? "border-red-300 text-red-600 bg-red-50" : "border-zinc-200 text-zinc-500 bg-zinc-50"}`}>
+                        <Clock className="w-3 h-3" />{dateOnly(post.dueDate)}
                       </span>
                     )}
                   </div>
@@ -790,7 +1047,7 @@ export default function InternalView({
                     type="date"
                     value={post.date || ""}
                     onClick={(e) => e.stopPropagation()}
-                    onChange={(e) => onUpdatePost({ ...post, date: e.target.value })}
+                    onChange={(e) => updatePostWithScheduling(post, { date: e.target.value })}
                     className="text-[10px] sm:text-[11px] font-bold text-zinc-400 bg-transparent border-none p-0 w-[105px] cursor-pointer hover:text-indigo-600 focus:text-indigo-600 focus:ring-0 text-right opacity-70 hover:opacity-100 transition-all shrink-0"
                     title="Edit Date"
                   />
@@ -798,7 +1055,21 @@ export default function InternalView({
               </div>
             </div>
           ))}
+          {colPosts.length > visible.length && (
+            <button
+              type="button"
+              onClick={() => setColShown((s) => ({ ...s, [col.id]: (s[col.id] ?? 12) + 12 }))}
+              className="w-full py-2 text-[10px] font-black uppercase tracking-widest text-indigo-600 hover:bg-indigo-50 rounded-lg"
+            >
+              Show more ({colPosts.length - visible.length})
+            </button>
+          )}
+              </div>
+            </div>
+            );
+          })}
         </div>
+        )}
         </> ) : (
           /* Archived Posts Grid */
           <div>
@@ -813,14 +1084,16 @@ export default function InternalView({
                 <p className="text-sm mt-1">Archived posts will appear here.</p>
               </div>
             ) : (
+              <>
               <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 sm:gap-6">
-                {archivedPosts.map((post) => (
+                {archivedPosts.slice(0, listShown).map((post) => (
                   <div
                     key={post.id}
-                    className="bg-white rounded-xl border-2 border-zinc-200 overflow-hidden shadow-sm flex flex-col relative opacity-80 hover:opacity-100 transition-opacity"
+                    onClick={() => { setActiveTab("workflow"); setActivePostId(post.id); }}
+                    className="bg-white rounded-xl border-2 border-zinc-200 overflow-hidden shadow-sm flex flex-col relative opacity-80 hover:opacity-100 transition-opacity cursor-pointer"
                   >
                     {/* Thumbnail */}
-                    <div className="relative aspect-[4/5] bg-zinc-100 overflow-hidden shrink-0">
+                    <div className={`relative ${tileAspectClass(post.format)} bg-zinc-100 overflow-hidden shrink-0`}>
                       {(post.thumbnailUrl || (post.mediaUrls && post.mediaUrls[0])) ? (
                         <img src={post.thumbnailUrl || post.mediaUrls[0]} alt={post.title} onError={(e) => { e.currentTarget.src = fallbackSvg; }} className="w-full h-full object-cover" />
                       ) : (
@@ -832,6 +1105,7 @@ export default function InternalView({
                         <div className="bg-black/50 backdrop-blur-md text-white p-1.5 rounded-lg">
                           {post.format === "carousel" && <Copy className="w-3.5 h-3.5" />}
                           {post.format === "reel" && <Play className="w-3.5 h-3.5 fill-current" />}
+                          {post.format === "story" && <RectangleVertical className="w-3.5 h-3.5" />}
                           {post.format === "image" && <ImageIcon className="w-3.5 h-3.5" />}
                         </div>
                       </div>
@@ -839,13 +1113,21 @@ export default function InternalView({
                     <div className="p-4 flex flex-col flex-1">
                       <h3 className="font-bold text-sm text-zinc-900 line-clamp-2 mb-2 leading-tight">{post.title}</h3>
                       <div className="mt-auto pt-2 border-t border-zinc-50 flex items-center justify-between gap-1">
-                        <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border bg-zinc-100 text-zinc-500 border-zinc-200">
-                          {post.internalStatus}
-                        </span>
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <Badge variant="neutral" className="shrink-0">{post.internalStatus}</Badge>
+                          {post.campaignCode && (
+                            <span className="flex items-center gap-0.5 text-[9px] font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200 shrink-0 max-w-[90px] truncate" title={post.campaignCode}>
+                              <Tag className="w-2.5 h-2.5" />{post.campaignCode}
+                            </span>
+                          )}
+                        </div>
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
                             onUpdatePost({ ...post, archivedAt: null });
+                            setArchivedPosts((prev) => prev.filter((p) => p.id !== post.id));
+                            setActiveTab("workflow");
+                            setActivePostId(post.id);
                           }}
                           className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md bg-indigo-50 text-indigo-600 border border-indigo-200 hover:bg-indigo-100 transition-colors"
                         >
@@ -856,6 +1138,16 @@ export default function InternalView({
                   </div>
                 ))}
               </div>
+              {archivedPosts.length > listShown && (
+                <button
+                  type="button"
+                  onClick={() => setListShown((n) => n + 24)}
+                  className="mt-4 w-full py-2.5 text-xs font-black uppercase tracking-widest text-indigo-600 hover:bg-indigo-50 rounded-xl border border-indigo-100"
+                >
+                  Show more ({archivedPosts.length - listShown})
+                </button>
+              )}
+              </>
             )}
           </div>
         )}
@@ -869,21 +1161,26 @@ export default function InternalView({
             className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-zinc-950/80 backdrop-blur-sm"
             onClick={() => setActivePostId(null)}
           >
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.95, opacity: 0, y: 20 }}
-              className="bg-white rounded-[32px] shadow-2xl w-full max-w-6xl max-h-[95vh] overflow-hidden flex flex-col md:flex-row relative"
+             <motion.div
+               ref={detailDialogRef}
+               role="dialog"
+               aria-modal="true"
+               aria-labelledby="agency-post-viewer-title"
+               tabIndex={-1}
+               initial={{ scale: 0.95, opacity: 0, y: 20 }}
+               animate={{ scale: 1, opacity: 1, y: 0 }}
+               exit={{ scale: 0.95, opacity: 0, y: 20 }}
+               className="bg-white rounded-[32px] shadow-2xl w-full max-w-6xl h-[95vh] md:h-[min(95vh,900px)] overflow-hidden flex flex-col md:flex-row relative min-h-0"
               onClick={(e) => e.stopPropagation()}
             >
               {/* Left: Media */}
-              <div className="w-full md:w-[42%] bg-zinc-900 flex flex-col relative overflow-hidden h-[40vh] md:h-auto">
+              <div className="w-full md:w-[42%] bg-zinc-900 flex flex-col relative overflow-hidden h-[45vh] md:h-full min-h-0">
                 {/* Overlay Header */}
                 <div className="absolute top-0 inset-x-0 p-4 z-40 flex items-center justify-between bg-gradient-to-b from-black/80 to-transparent">
                   <div className="flex items-center gap-2">
-                    <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${STATUS_COLORS[activePost.internalStatus]}`}>
+                    <Badge variant={statusVariant(activePost.internalStatus)}>
                       {activePost.internalStatus}
-                    </span>
+                    </Badge>
                     {activePost.isBlocked && (
                       <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border bg-red-500 text-white border-red-500 flex items-center gap-1">
                         <Lock className="w-3 h-3" /> Blocked
@@ -891,10 +1188,10 @@ export default function InternalView({
                     )}
                   </div>
                   <div className="flex gap-1">
-                    <button onClick={handlePrev} disabled={activePostFilteredIdx <= 0} className="p-2 text-white/60 hover:text-white bg-black/20 hover:bg-black/40 rounded-lg disabled:opacity-30 transition-all">
+                     <button type="button" aria-label="Previous post" onClick={handlePrev} disabled={activePostFilteredIdx <= 0} className="p-2 text-white/60 hover:text-white bg-black/20 hover:bg-black/40 rounded-lg disabled:opacity-30 transition-all">
                       <ChevronLeft className="w-5 h-5" />
                     </button>
-                    <button onClick={handleNext} disabled={activePostFilteredIdx >= filteredPosts.length - 1} className="p-2 text-white/60 hover:text-white bg-black/20 hover:bg-black/40 rounded-lg disabled:opacity-30 transition-all">
+                     <button type="button" aria-label="Next post" onClick={handleNext} disabled={activePostFilteredIdx >= filteredPosts.length - 1} className="p-2 text-white/60 hover:text-white bg-black/20 hover:bg-black/40 rounded-lg disabled:opacity-30 transition-all">
                       <ChevronRight className="w-5 h-5" />
                     </button>
                   </div>
@@ -1015,18 +1312,23 @@ export default function InternalView({
               <div className="flex-1 flex flex-col min-h-0 bg-white">
                 <header className="p-6 border-b border-zinc-100 flex items-start justify-between">
                   <div className="flex-1">
-                    <h2 className="text-2xl font-black text-zinc-900 leading-tight mb-2 tracking-tight">{activePost.title}</h2>
+                     <h2 id="agency-post-viewer-title" className="text-2xl font-black text-zinc-900 leading-tight mb-2 tracking-tight">{activePost.title}</h2>
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs font-bold text-zinc-400 uppercase tracking-widest">
                       <span className="flex items-center gap-1.5 bg-zinc-50 px-2 py-1 rounded-md text-zinc-500">
                         <Tag className="w-3.5 h-3.5" />{activePost.campaignCode || "—"}
                       </span>
                       <span>· {activePost.contentPillar || "—"}</span>
+                      {activePost.dueDate && (
+                        <span className={`flex items-center gap-1 ${isOverdue(activePost.dueDate) ? "text-red-500" : ""}`}>
+                          · Due {dateOnly(activePost.dueDate)}
+                        </span>
+                      )}
                       <div className="flex items-center gap-1 group cursor-pointer" title="Edit Date">
                         <span>·</span>
                         <input
                           type="date"
                           value={activePost.date || ""}
-                          onChange={(e) => onUpdatePost({ ...activePost, date: e.target.value })}
+                          onChange={(e) => updatePostWithScheduling(activePost, { date: e.target.value })}
                           className="bg-transparent border border-transparent hover:border-zinc-300 focus:border-indigo-500 rounded px-1 -ml-0.5 text-xs font-bold text-zinc-400 focus:text-zinc-900 group-hover:text-zinc-600 outline-none transition-all cursor-pointer w-[105px] h-6 inline-flex m-0"
                         />
                       </div>
@@ -1055,7 +1357,7 @@ export default function InternalView({
                     >
                       <Share2 className="w-5 h-5" />
                     </button>
-                    <button onClick={() => setActivePostId(null)} className="p-2.5 text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 rounded-xl transition-all" title="Close">
+                     <button type="button" onClick={() => setActivePostId(null)} aria-label="Close post viewer" className="p-2.5 text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 rounded-xl transition-all" title="Close">
                       <X className="w-5 h-5" />
                     </button>
                   </div>
@@ -1096,7 +1398,7 @@ export default function InternalView({
                         onChange={(e) => {
                           const next = e.target.value as InternalStatus;
                           const cs = clientStatusForInternalChange(next);
-                          onUpdatePost({ ...activePost, internalStatus: next, ...(cs !== undefined ? { clientStatus: cs } : {}) });
+                          updatePostWithScheduling(activePost, { internalStatus: next }, cs !== undefined ? { clientStatus: cs } : {});
                         }}
                       >
                         {(() => {
@@ -1111,7 +1413,7 @@ export default function InternalView({
                   </div>
 
                   {/* Action Buttons */}
-                  <div className="flex gap-3">
+                  <div className="flex flex-wrap gap-3">
                     {canCreate && (
                       <button onClick={() => handleDuplicate(activePost)} className="flex-1 flex items-center justify-center gap-2 py-3 bg-zinc-50 hover:bg-zinc-100 text-zinc-700 rounded-2xl text-xs font-bold border border-zinc-200 transition-all">
                         <Copy className="w-4 h-4" /> Duplicate
@@ -1123,9 +1425,17 @@ export default function InternalView({
                         if (incompleteTasks.length > 0) {
                           if (!window.confirm(`⚠️ There are ${incompleteTasks.length} incomplete production task(s). Send to client anyway?`)) return;
                         }
-                        onUpdatePost({ ...activePost, internalStatus: "Ready for Client" });
+                        onUpdatePost({ ...activePost, internalStatus: "Ready for Client", clientStatus: "Needs Your Review" });
                       }} className="flex-[2] flex items-center justify-center gap-2 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl text-xs font-bold shadow-lg shadow-indigo-100 transition-all">
-                        <CheckCircle2 className="w-4 h-4" /> Send to Client View
+                         <CheckCircle2 className="w-4 h-4" /> Send for client review
+                      </button>
+                    )}
+                    {(canCreate || canReviewContent) && activePost.internalStatus === "Changes Requested" && (
+                      <button
+                        onClick={() => onUpdatePost({ ...activePost, internalStatus: "Ready for Client", clientStatus: "Needs Your Review" })}
+                        className="flex-[2] flex items-center justify-center gap-2 py-3 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded-2xl text-xs font-bold border border-amber-200 transition-all"
+                      >
+                         <Send className="w-4 h-4" /> Resubmit for review
                       </button>
                     )}
                   </div>
@@ -1326,52 +1636,14 @@ export default function InternalView({
         )}
       </AnimatePresence>
 
-      {/* Share Modal */}
-      <AnimatePresence>
-        {showShareModal && (
-          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => setShowShareModal(false)}>
-            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
-              onClick={e => e.stopPropagation()} className="bg-white rounded-2xl p-6 w-full max-w-lg shadow-2xl space-y-6">
-              <div className="flex items-center justify-between border-b pb-4">
-                <h3 className="text-xl font-bold text-zinc-900">Share Access</h3>
-                <button onClick={() => setShowShareModal(false)} className="text-zinc-400 hover:text-zinc-900 transition-colors"><X className="w-5 h-5" /></button>
-              </div>
-              <div className="space-y-4">
-                {(() => {
-                  const currentTenant = tenants.find(t => t.id === _tenantId);
-                  const baseUrl = window.location.origin;
-                  const settings = typeof currentTenant?.settings === "string" ? JSON.parse(currentTenant.settings) : currentTenant?.settings;
-                  const clientToken = settings?.clientToken || "";
-                  const agencyToken = settings?.internalToken || "";
-                  const clientLink = `${baseUrl}/client/${_tenantId}?token=${clientToken}`;
-                  const agencyLink = `${baseUrl}/agency/${_tenantId}?token=${agencyToken}`;
-                  return (
-                    <>
-                      <div className="p-4 bg-indigo-50 rounded-xl border border-indigo-100 group relative">
-                        <label className="block text-[10px] font-bold uppercase tracking-widest text-indigo-400 mb-2">Internal Agency Cockpit</label>
-                        <div className="flex gap-2">
-                          <input readOnly value={agencyLink} className="flex-1 bg-white border border-indigo-200 rounded-lg px-3 py-2 text-xs font-mono text-indigo-600 truncate" />
-                          <button onClick={() => { navigator.clipboard.writeText(agencyLink); success("Agency link copied"); }} className="p-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors active:scale-95"><Copy className="w-4 h-4" /></button>
-                        </div>
-                      </div>
-                      <div className="p-4 bg-emerald-50 rounded-xl border border-emerald-100">
-                        <label className="block text-[10px] font-bold uppercase tracking-widest text-emerald-400 mb-2">Client Review Link</label>
-                        <div className="flex gap-2">
-                          <input readOnly value={clientLink} className="flex-1 bg-white border border-emerald-200 rounded-lg px-3 py-2 text-xs font-mono text-emerald-600 truncate" />
-                          <button onClick={() => { navigator.clipboard.writeText(clientLink); success("Client link copied"); }} className="p-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors active:scale-95"><Copy className="w-4 h-4" /></button>
-                        </div>
-                      </div>
-                      <p className="text-[11px] text-zinc-500 leading-relaxed border border-zinc-100 rounded-xl p-3 bg-zinc-50/80">
-                        <span className="font-bold text-zinc-700">One post only?</span> Open a post and tap the <span className="text-indigo-600 font-semibold">share icon</span> next to edit in the post header.
-                      </p>
-                    </>
-                  );
-                })()}
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      <ShareClientLinkModal
+        isOpen={showShareModal}
+        onClose={() => setShowShareModal(false)}
+        tenant={currentTenant ? { id: String(currentTenant.id), name: String(currentTenant.name || currentTenant.id) } : null}
+        adminToken={adminToken}
+        currentUser={currentUser}
+        includeAgencyLink
+      />
 
       {/* Tenant Manager */}
       <TenantManagerModal
@@ -1383,13 +1655,18 @@ export default function InternalView({
       />
 
       {/* Campaign Manager */}
-      <CampaignManagerModal
-        isOpen={showCampaignModal}
-        onClose={() => setShowCampaignModal(false)}
-        tenantId={_tenantId}
-        adminToken={adminToken}
-        emit={emit || (() => { })}
-      />
+      {showCampaignModal && (
+        <Suspense fallback={null}>
+          <CampaignManagerModal
+            isOpen={showCampaignModal}
+            onClose={() => setShowCampaignModal(false)}
+            tenantId={_tenantId}
+            adminToken={adminToken}
+            emit={emit || (() => { })}
+            onRefresh={refreshWorkspaceCatalog}
+          />
+        </Suspense>
+      )}
 
       {/* Bulk Action Bar */}
       <AnimatePresence>
@@ -1407,7 +1684,7 @@ export default function InternalView({
             <div className="flex items-center gap-2">
               {canReviewContent && (
                 <button onClick={handlePushToReview} className="px-4 py-2 bg-indigo-500 hover:bg-indigo-400 rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-lg shadow-indigo-500/20">
-                  <Send className="w-4 h-4" /> Push to Review
+                   <Send className="w-4 h-4" /> Send for review
                 </button>
               )}
               <button onClick={handleShareSelected} className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-lg shadow-emerald-500/20">
@@ -1454,13 +1731,18 @@ export default function InternalView({
       />
 
       {/* Batch Upload */}
-      <BatchUploadModal isOpen={showBatchModal} onClose={() => setShowBatchModal(false)} onComplete={onCreatePostsBulk} />
+      {showBatchModal && (
+        <Suspense fallback={null}>
+          <BatchUploadModal isOpen={showBatchModal} onClose={() => setShowBatchModal(false)} onComplete={onCreatePostsBulk} />
+        </Suspense>
+      )}
 
       {/* Post Form — key forces re-init when editingPost changes so status is never stale */}
       {showFormModal && (
+        <Suspense fallback={<div role="status" className="fixed inset-0 z-[70] grid place-items-center bg-black/60 text-sm font-medium text-white">Loading post editor…</div>}>
         <PostFormModal
-          key={editingPost?.id ?? "new"}
-          onClose={() => { setShowFormModal(false); setEditingPost(null); }}
+          key={editingPost?.id ?? `new-${calendarDraftDate ?? "today"}`}
+          onClose={() => { setShowFormModal(false); setEditingPost(null); setCalendarDraftDate(undefined); }}
           onSubmit={(p) => {
             if (editingPost) {
               const latestPost = posts.find((px) => px.id === editingPost.id) ?? editingPost;
@@ -1476,8 +1758,22 @@ export default function InternalView({
             }
             setShowFormModal(false);
             setEditingPost(null);
+            setCalendarDraftDate(undefined);
           }}
           post={editingPost}
+          initialDate={calendarDraftDate}
+          pillarOptions={workspacePillars}
+          campaignOptions={workspaceCampaigns}
+        />
+        </Suspense>
+      )}
+      {adminToken && currentUser && (
+        <UpdatesModal
+          isOpen={showUpdatesModal}
+          onClose={() => { setShowUpdatesModal(false); setUnreadUpdates(0); }}
+          adminToken={adminToken}
+          isSuperAdmin={isSuperAdmin}
+          onUnreadChange={setUnreadUpdates}
         />
       )}
     </div>

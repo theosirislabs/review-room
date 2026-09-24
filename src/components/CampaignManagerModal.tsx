@@ -9,21 +9,28 @@ const PRESET_COLORS = [
     "#10b981", "#3b82f6", "#14b8a6", "#f97316", "#84cc16",
 ];
 
+interface CampaignCreateResult {
+    success: boolean;
+    campaign?: Campaign;
+    error?: string;
+}
+
 interface Props {
     isOpen: boolean;
     onClose: () => void;
     tenantId: string;
     adminToken: string;
-    emit: (event: string, data: any) => void;
+    emit: (event: string, data: any, callback?: (result: any) => void) => void;
     onRefresh?: () => void;
 }
 
-export default function CampaignManagerModal({ isOpen, onClose, tenantId, adminToken, emit }: Props) {
+export default function CampaignManagerModal({ isOpen, onClose, tenantId, adminToken, emit, onRefresh }: Props) {
     const [campaigns, setCampaigns] = useState<Campaign[]>([]);
     const [pillars, setPillars] = useState<ContentPillar[]>([]);
     const [activeTab, setActiveTab] = useState<"campaigns" | "pillars">("campaigns");
     const [loading, setLoading] = useState(false);
     const [editingCampaign, setEditingCampaign] = useState<Partial<Campaign> | null>(null);
+    const [campaignError, setCampaignError] = useState<string | null>(null);
     const [newPillarName, setNewPillarName] = useState("");
     const [newPillarColor, setNewPillarColor] = useState("#6366f1");
     const [confirmDelete, setConfirmDelete] = useState<{ open: boolean; label: string; onConfirm: () => void }>({
@@ -42,15 +49,21 @@ export default function CampaignManagerModal({ isOpen, onClose, tenantId, adminT
 
     const saveCampaign = () => {
         if (!editingCampaign?.name) return;
+        setCampaignError(null);
         if (editingCampaign.id) {
             emit("update-campaign", { tenantId, campaign: editingCampaign, adminToken });
             setCampaigns(prev => prev.map(c => c.id === editingCampaign.id ? { ...c, ...editingCampaign } as Campaign : c));
         } else {
-            emit("create-campaign", { tenantId, campaign: editingCampaign, adminToken });
-            // Optimistic add
-            const optimistic = { ...editingCampaign, id: `opt-${Date.now()}`, tenantId, createdAt: new Date().toISOString() } as Campaign;
-            setCampaigns(prev => [...prev, optimistic]);
-            setTimeout(loadData, 300); // reload to get real ID
+            emit("create-campaign", { tenantId, campaign: editingCampaign, adminToken }, (result: CampaignCreateResult) => {
+                if (!result.success || !result.campaign) {
+                    setCampaignError(result.error || "Campaign could not be saved. Please try again.");
+                    return;
+                }
+                setCampaigns(prev => [...prev, result.campaign!]);
+                setEditingCampaign(null);
+                onRefresh?.();
+            });
+            return;
         }
         setEditingCampaign(null);
     };
@@ -76,8 +89,10 @@ export default function CampaignManagerModal({ isOpen, onClose, tenantId, adminT
     if (!isOpen) return null;
 
     return (
+        <>
         <AnimatePresence>
             <motion.div
+                key="campaign-manager"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
@@ -154,6 +169,7 @@ export default function CampaignManagerModal({ isOpen, onClose, tenantId, adminT
                                 {editingCampaign && (
                                     <div className="p-5 bg-indigo-50 rounded-2xl border border-indigo-100 space-y-3">
                                         <h3 className="text-sm font-black text-indigo-900 uppercase tracking-wider">{editingCampaign.id ? "Edit Campaign" : "New Campaign"}</h3>
+                                        {campaignError && <p role="alert" className="text-xs font-semibold text-red-600">{campaignError}</p>}
                                         <div className="grid grid-cols-2 gap-3">
                                             <input className="col-span-2 px-3 py-2.5 bg-white border border-indigo-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-indigo-400 outline-none" placeholder="Campaign name *" value={editingCampaign.name || ""} onChange={e => setEditingCampaign(p => ({ ...p, name: e.target.value }))} />
                                             <input className="px-3 py-2.5 bg-white border border-indigo-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-indigo-400 outline-none uppercase" placeholder="Code (e.g. SPR26)" value={editingCampaign.code || ""} onChange={e => setEditingCampaign(p => ({ ...p, code: e.target.value.toUpperCase() }))} />
@@ -220,8 +236,9 @@ export default function CampaignManagerModal({ isOpen, onClose, tenantId, adminT
                     </div>
                 </motion.div>
             </motion.div>
+        </AnimatePresence>
 
-            <ConfirmDialog
+        <ConfirmDialog
                 isOpen={confirmDelete.open}
                 title="Confirm Delete"
                 message={confirmDelete.label}
@@ -230,6 +247,6 @@ export default function CampaignManagerModal({ isOpen, onClose, tenantId, adminT
                 onConfirm={() => { confirmDelete.onConfirm(); setConfirmDelete(p => ({ ...p, open: false })); }}
                 onCancel={() => setConfirmDelete(p => ({ ...p, open: false }))}
             />
-        </AnimatePresence>
+        </>
     );
 }

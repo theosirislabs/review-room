@@ -15,11 +15,16 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 import Database from "better-sqlite3";
 import { randomUUID, scryptSync, timingSafeEqual } from "crypto";
-import { mkdirSync, existsSync, unlinkSync, createReadStream, createWriteStream, readdirSync, rmSync } from "fs";
+import { mkdirSync, existsSync, unlinkSync, createReadStream, createWriteStream, rmSync, renameSync, statSync, openSync, readSync, closeSync } from "fs";
+import { spawn } from "child_process";
 import { Readable, Transform } from "stream";
 import { pipeline } from "stream/promises";
 import path from "path";
 import multer from "multer";
+import { mountReviewRoomMcp } from "./src/mcp/mount.js";
+import { generateMcpToken } from "./src/mcp/auth.js";
+import { mountProductionStaticAssets } from "./src/staticDelivery.js";
+import { getOperationalAnalytics } from "./src/analyticsUtils.js";
 
 // ── Data directories ──────────────────────────────────────────
 const DATA_DIR = path.join(process.cwd(), "data");
@@ -32,6 +37,7 @@ mkdirSync(CHUNKS_DIR, { recursive: true });
 const db = new Database(path.join(DATA_DIR, "osiris.db"));
 db.pragma("journal_mode = WAL");
 db.pragma("synchronous = NORMAL");
+db.pragma("busy_timeout = 5000");
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS posts (
@@ -214,6 +220,57 @@ try {
 }
 
 runMigration("SELECT archivedAt FROM posts LIMIT 1", "ALTER TABLE posts ADD COLUMN archivedAt TEXT", "Adding 'archivedAt' to posts");
+runMigration("SELECT sortOrder FROM posts LIMIT 1", "ALTER TABLE posts ADD COLUMN sortOrder INTEGER", "Adding 'sortOrder' to posts");
+try {
+  db.exec("UPDATE posts SET sortOrder = rowid WHERE sortOrder IS NULL");
+} catch { /* ignore */ }
+
+try {
+  db.prepare("SELECT 1 FROM mcp_tokens LIMIT 1").get();
+} catch (e: any) {
+  if (e.message?.includes("no such table")) {
+    console.log("[MIGRATION] Creating mcp_tokens table");
+    db.exec(`
+      CREATE TABLE mcp_tokens (
+        id TEXT PRIMARY KEY,
+        userId TEXT NOT NULL,
+        name TEXT NOT NULL,
+        tokenHash TEXT NOT NULL UNIQUE,
+        prefix TEXT NOT NULL,
+        role TEXT NOT NULL,
+        createdAt TEXT NOT NULL,
+        lastUsedAt TEXT,
+        revoked INTEGER NOT NULL DEFAULT 0,
+        expiresAt TEXT
+      );
+      CREATE INDEX idx_mcp_tokens_user ON mcp_tokens(userId);
+    `);
+  }
+}
+
+try {
+  db.prepare("SELECT 1 FROM product_updates LIMIT 1").get();
+} catch (e: any) {
+  if (e.message?.includes("no such table")) {
+    console.log("[MIGRATION] Creating product_updates tables");
+    db.exec(`
+      CREATE TABLE product_updates (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        published INTEGER NOT NULL DEFAULT 1,
+        createdAt TEXT NOT NULL,
+        createdBy TEXT NOT NULL
+      );
+      CREATE TABLE product_update_reads (
+        userId TEXT NOT NULL,
+        updateId TEXT NOT NULL,
+        readAt TEXT NOT NULL,
+        PRIMARY KEY (userId, updateId)
+      );
+    `);
+  }
+}
 
 // ── Seed Tenants ──────────────────────────────────────────────
 const tenantCount = db.prepare("SELECT COUNT(*) as count FROM tenants").get() as { count: number };
@@ -234,16 +291,42 @@ const verifyPassword = (password: string, hash: string) => {
 
 // ── Seed Agency Users (auth accounts) ─────────────────────────
 const defaultAdminUsername = "youssef@theosirislabs.com";
-const defaultAdminPassword = "Osiris2026New";
+const defaultAdminPassword = process.env.ADMIN_SEED_PASSWORD;
 const existingAdmin = db.prepare("SELECT id FROM agency_users WHERE username = ?").get(defaultAdminUsername);
 if (!existingAdmin) {
-  db.prepare("INSERT INTO agency_users (id, username, passwordHash, role, createdAt) VALUES (?,?,?,?,?)")
-    .run(randomUUID(), defaultAdminUsername, hashPassword(defaultAdminPassword), "super-admin", new Date().toISOString());
-  console.log(`[SEED] Created super-admin: ${defaultAdminUsername}`);
+  if (!defaultAdminPassword) {
+    console.warn("[SEED] ADMIN_SEED_PASSWORD not set; skipping admin seed (existing DB expected)");
+  } else {
+    db.prepare("INSERT INTO agency_users (id, username, passwordHash, role, createdAt) VALUES (?,?,?,?,?)")
+      .run(randomUUID(), defaultAdminUsername, hashPassword(defaultAdminPassword), "super-admin", new Date().toISOString());
+    console.log(`[SEED] Created super-admin: ${defaultAdminUsername}`);
+  }
 }
 
 // Ensure designated super-admins (idempotent)
 db.prepare("UPDATE agency_users SET role = 'super-admin' WHERE lower(username) = lower(?)").run("y.tawfiq@theosirislabs.com");
+
+try {
+  const updateCount = db.prepare("SELECT COUNT(*) as c FROM product_updates").get() as { c: number };
+  if (updateCount.c === 0) {
+    const author = (db.prepare("SELECT id FROM agency_users WHERE role = 'super-admin' LIMIT 1").get() as { id: string } | undefined)?.id || "system";
+    db.prepare("INSERT INTO product_updates (id, title, body, published, createdAt, createdBy) VALUES (?,?,?,?,?,?)")
+      .run(
+        randomUUID(),
+        "What's new in Review Room",
+        [
+          "Workflow board: Drafts, Internal Review, Client Review, Needs Changes, Live. Drag a card onto another card to place it; drop on empty column space to send it to the end.",
+          "Stories are a first-class 9:16 format (not a reel).",
+          "Deadlines persist and show on cards. Restore from Archive returns the post to the board and opens it.",
+          "After a client change request, Resubmit to Client sends it back without wiping the thread.",
+          "Command Center → MCP: mint an agent key so Hermes/Cursor/Claude can operate Review Room.",
+        ].join("\n\n"),
+        1,
+        new Date().toISOString(),
+        author
+      );
+  }
+} catch { /* table may not exist on very old snapshots */ }
 
 // ── Seed Team Members ─────────────────────────────────────────
 const teamCount = db.prepare("SELECT COUNT(*) as count FROM team_members").get() as { count: number };
@@ -308,12 +391,13 @@ const upload = multer({
   },
 });
 
-// Chunked upload: 25MB per chunk (well under Cloudflare 100MB limit)
-const CHUNK_SIZE = 25 * 1024 * 1024;
-const CHUNK_MULTER_LIMIT = 30 * 1024 * 1024; // Slightly above CHUNK_SIZE for buffer
+// Chunked upload accepts up to 30MB, above the client-side 25MB chunk size.
+const CHUNK_MULTER_LIMIT = 30 * 1024 * 1024;
 const chunkStorage = multer.diskStorage({
   destination: (req, _file, cb) => {
-    const uploadId = (req.body?.uploadId as string) || "unknown";
+        const rawUploadId = (req.body?.uploadId as string) || "unknown";
+    // Sanitize: only allow safe characters to prevent path traversal
+    const uploadId = rawUploadId.replace(/[^a-zA-Z0-9_-]/g, "_");
     const dir = path.join(CHUNKS_DIR, uploadId);
     mkdirSync(dir, { recursive: true });
     cb(null, dir);
@@ -583,6 +667,7 @@ function isPostVisibleOnClientLink(p: { clientStatus?: string }) {
 function getPosts(tenantId: string, includeArchived = false) {
   let query = "SELECT * FROM posts WHERE tenantId = ?";
   if (!includeArchived) query += " AND archivedAt IS NULL";
+  query += " ORDER BY COALESCE(sortOrder, 999999), date, time";
   const posts = db.prepare(query).all(tenantId) as any[];
   const comments = db.prepare("SELECT * FROM comments WHERE postId IN (SELECT id FROM posts WHERE tenantId = ?)").all(tenantId) as any[];
   const tasks = db.prepare("SELECT * FROM tasks WHERE postId IN (SELECT id FROM posts WHERE tenantId = ?)").all(tenantId) as any[];
@@ -595,6 +680,15 @@ function getPosts(tenantId: string, includeArchived = false) {
     clientComments: comments.filter((c) => c.postId === p.id).map((c) => ({ ...c, isInternalOnly: c.isInternalOnly === 1 })),
     internalTasks: tasks.filter((t) => t.postId === p.id).map((t) => ({ ...t, completed: t.completed === 1 })),
   }));
+}
+
+function getPostById(tenantId: string, postId: string) {
+  return getPosts(tenantId, true).find((p) => p.id === postId);
+}
+
+function nextSortOrder(tenantId: string): number {
+  const row = db.prepare("SELECT COALESCE(MAX(sortOrder), 0) as m FROM posts WHERE tenantId = ?").get(tenantId) as { m: number };
+  return (row?.m || 0) + 1;
 }
 
 function mapFullPostToClientStrip(p: any) {
@@ -616,8 +710,9 @@ function mapFullPostToClientStrip(p: any) {
     internalTasks: [],
     internalNotes: "",
     assetLineage: "",
-    campaignCode: "",
-    contentPillar: "",
+    campaignCode: p.campaignCode || "",
+    contentPillar: p.contentPillar || "",
+    dueDate: p.dueDate || undefined,
     assignee: "",
     revisionCount: 0,
     blockedReason: p.isBlocked ? p.blockedReason : undefined,
@@ -648,6 +743,15 @@ function emitToPostShareRooms(io: Server, postId: string, event: string, payload
   }
 }
 
+function emitToShareSetRooms(io: Server, postId: string, event: string, payload: any) {
+  const rows = db.prepare(`
+    SELECT s.token FROM share_sets s
+    JOIN share_set_posts p ON p.shareSetId = s.id
+    WHERE p.postId = ? AND s.revoked = 0
+  `).all(postId) as { token: string }[];
+  for (const r of rows) io.to(`share-set:${r.token}`).emit(event, payload);
+}
+
 const deriveClientStatus = (
   internalStatus: string,
   requestedClientStatus?: string,
@@ -674,7 +778,7 @@ const deriveClientStatus = (
   return "Not Ready for Client";
 };
 
-function logActivity(tenantId: string, action: string, subject: string, detail: string, user: string = "system") {
+function logActivity(tenantId: string, action: string, subject: string, detail: string = "", user: string = "system") {
   try {
     db.prepare("INSERT INTO activity_log (id, tenantId, action, subject, detail, user, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)")
       .run(randomUUID(), tenantId, action, subject, detail, user, new Date().toISOString());
@@ -756,6 +860,29 @@ function extFromUrl(u: string): string | null {
 type AgencyRole = "super-admin" | "graphic-designer" | "marketing-team" | "reviewer" | "user";
 const ALL_AGENCY_ROLES: AgencyRole[] = ["super-admin", "graphic-designer", "marketing-team", "reviewer", "user"];
 const DEFAULT_SSO_ROLE: AgencyRole = (process.env.AUTHENTIK_DEFAULT_ROLE as AgencyRole) || "user";
+
+type SocketActorKind = "staff" | "magic-internal" | "client" | "share" | "share-set";
+type SocketActor = {
+  kind: SocketActorKind;
+  tenantId: string;
+  role?: AgencyRole;
+  postIds?: string[];
+};
+const CLIENT_SAFE_EVENTS = new Set(["update-post", "add-comment"]);
+const actorIsClientLike = (a: SocketActor) => a.kind === "client" || a.kind === "share" || a.kind === "share-set";
+const actorIsAgency = (a: SocketActor) => a.kind === "staff" || a.kind === "magic-internal";
+const actorCanCreate = (a: SocketActor) =>
+  a.kind === "magic-internal" || (a.kind === "staff" && (a.role === "super-admin" || a.role === "graphic-designer"));
+const actorCanUpdatePost = (a: SocketActor) =>
+  actorIsClientLike(a) ||
+  a.kind === "magic-internal" ||
+  (a.kind === "staff" && a.role !== "user");
+const actorCanMutateTasks = (a: SocketActor) => actorIsAgency(a) && a.role !== "user";
+const actorCanDeleteComment = (a: SocketActor) => actorIsAgency(a) && a.role !== "user";
+const actorAllowsPost = (a: SocketActor, postId?: string) => {
+  if (!a.postIds) return true;
+  return !!postId && a.postIds.includes(postId);
+};
 interface Session { userId: string; username: string; role: AgencyRole; expiresAt: number; }
 const sessions = new Map<string, Session>();
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
@@ -831,9 +958,7 @@ const requireTenantAuth = (req: any, res: any, tenantId: string): boolean => {
   return false;
 };
 
-/** Agency session or tenant internal token (not client token). */
-const requireAgencyOrInternalStaff = (req: any, res: any, tenantId: string): boolean => {
-  if (getSession(getToken(req))) return true;
+const staffInternalTokenOk = (req: any, res: any, tenantId: string): boolean => {
   const passedToken = req.headers["x-tenant-token"] || req.query.token;
   const tenant = db.prepare("SELECT settings FROM tenants WHERE id = ?").get(tenantId) as any;
   if (!tenant) {
@@ -846,6 +971,274 @@ const requireAgencyOrInternalStaff = (req: any, res: any, tenantId: string): boo
   return false;
 };
 
+/** Agency session or tenant internal token (not client token). Reads may include role=user. */
+const requireAgencyOrInternalStaff = (req: any, res: any, tenantId: string): boolean => {
+  if (getSession(getToken(req))) return true;
+  return staffInternalTokenOk(req, res, tenantId);
+};
+
+/** Writes: agency role !== user, or magic internal token. */
+const requireAgencyMutator = (req: any, res: any, tenantId: string): boolean => {
+  const s = getSession(getToken(req));
+  if (s) {
+    if (s.role === "user") {
+      res.status(403).json({ error: "Forbidden: Insufficient permissions" });
+      return false;
+    }
+    return true;
+  }
+  return staffInternalTokenOk(req, res, tenantId);
+};
+
+/** Post create/delete: super-admin, graphic-designer, or magic internal token. */
+const requireAgencyCreator = (req: any, res: any, tenantId: string): boolean => {
+  const s = getSession(getToken(req));
+  if (s) {
+    if (s.role !== "super-admin" && s.role !== "graphic-designer") {
+      res.status(403).json({ error: "Forbidden: Insufficient permissions" });
+      return false;
+    }
+    return true;
+  }
+  return staffInternalTokenOk(req, res, tenantId);
+};
+
+const postOwnedByTenant = (postId: string, tenantId: string) =>
+  db.prepare("SELECT id FROM posts WHERE id = ? AND tenantId = ?").get(postId, tenantId);
+
+const ALLOWED_UPLOAD_EXT = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".mp4", ".mov", ".avi", ".mkv", ".heic", ".webm"];
+const MAX_UPLOAD_CHUNKS = 80; // 80 × 25MB = 2GB
+
+// ── Video post-processing (faststart + poster frame) ──────────
+// Browsers cannot start playback of an MP4 whose `moov` atom sits after `mdat`
+// (they must download the whole file first), and a tile without a poster shows
+// nothing until playback starts. Uploads are normalised in the background so the
+// request path stays fast and no upload can silently produce an unplayable post.
+const VIDEO_EXT = new Set([".mp4", ".mov", ".webm", ".avi", ".mkv", ".m4v"]);
+const isVideoPath = (p: string) => VIDEO_EXT.has(path.extname(p).toLowerCase());
+
+let ffmpegAvailable: boolean | null = null;
+const hasFfmpeg = (): boolean => {
+  if (ffmpegAvailable === null) {
+    try {
+      const probe = spawn("ffmpeg", ["-version"], { stdio: "ignore" });
+      probe.on("error", () => { ffmpegAvailable = false; });
+      probe.on("close", (code) => { ffmpegAvailable = code === 0; });
+      // Assume available until the async probe says otherwise (one upload at most).
+      ffmpegAvailable = true;
+    } catch {
+      ffmpegAvailable = false;
+    }
+  }
+  return ffmpegAvailable;
+};
+
+const runBinary = (cmd: string, args: string[], timeoutMs = 1800000): Promise<boolean> =>
+  new Promise((resolve) => {
+    let settled = false;
+    const done = (v: boolean) => { if (!settled) { settled = true; clearTimeout(timer); resolve(v); } };
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(cmd, args, { stdio: "ignore" });
+    } catch {
+      return done(false);
+    }
+    const timer = setTimeout(() => { try { child.kill("SIGKILL"); } catch { /* ignore */ } done(false); }, timeoutMs);
+    child.on("error", () => done(false));
+    child.on("close", (code) => done(code === 0));
+  });
+
+const probeVideoDuration = (file: string): Promise<number | null> =>
+  new Promise((resolve) => {
+    let out = "";
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", file]);
+    } catch {
+      return resolve(null);
+    }
+    const timer = setTimeout(() => { try { child.kill("SIGKILL"); } catch { /* ignore */ } resolve(null); }, 60000);
+    child.stdout?.on("data", (d) => { out += String(d); });
+    child.on("error", () => { clearTimeout(timer); resolve(null); });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      const v = parseFloat(out.trim());
+      resolve(code === 0 && Number.isFinite(v) && v > 0 ? v : null);
+    });
+  });
+
+/** Top-level MP4 atom order (seek-based, so multi-GB files stay cheap to inspect). */
+const mp4AtomOrder = (file: string, limit = 8): string[] => {
+  const out: string[] = [];
+  const size = statSync(file).size;
+  const fd = openSync(file, "r");
+  let off = 0;
+  try {
+    for (let i = 0; i < limit; i++) {
+      const hdr = Buffer.alloc(8);
+      if (readSync(fd, hdr, 0, 8, off) < 8) break;
+      let sz = hdr.readUInt32BE(0);
+      const typ = hdr.toString("latin1", 4, 8);
+      if (sz === 1) {
+        const ext = Buffer.alloc(8);
+        if (readSync(fd, ext, 0, 8, off + 8) < 8) break;
+        sz = Number(ext.readBigUInt64BE(0));
+      } else if (sz === 0) {
+        sz = size - off;
+      }
+      out.push(typ);
+      if (sz <= 0) break;
+      off += sz;
+      if (off >= size) break;
+    }
+  } finally {
+    closeSync(fd);
+  }
+  return out;
+};
+
+/** moov-at-the-end MP4s need a faststart remux before browsers can stream them. */
+const mp4NeedsFaststart = (file: string): boolean => {
+  try {
+    const order = mp4AtomOrder(file);
+    const moov = order.indexOf("moov");
+    const mdat = order.indexOf("mdat");
+    if (moov === -1 || mdat === -1) return false; // corrupt or unusual layout — leave untouched
+    return moov > mdat;
+  } catch {
+    return false;
+  }
+};
+
+const ensureFaststart = async (file: string): Promise<boolean> => {
+  if (!mp4NeedsFaststart(file)) return true;
+  const tmp = `${file}.faststart.tmp.mp4`;
+  const ok = await runBinary("ffmpeg", ["-y", "-loglevel", "error", "-i", file, "-c", "copy", "-movflags", "+faststart", tmp]);
+  if (!ok || !existsSync(tmp) || statSync(tmp).size < 1024) {
+    try { if (existsSync(tmp)) unlinkSync(tmp); } catch { /* ignore */ }
+    return false;
+  }
+  try {
+    renameSync(tmp, file);
+    return true;
+  } catch {
+    try { if (existsSync(tmp)) unlinkSync(tmp); } catch { /* ignore */ }
+    return false;
+  }
+};
+
+/** Extract a poster frame so tiles render a cover instead of an empty video box. */
+const generateVideoPoster = async (file: string): Promise<string | null> => {
+  const stem = path.basename(file, path.extname(file));
+  const name = `thumb-${stem}.jpg`;
+  const out = path.join(UPLOADS_DIR, name);
+  if (existsSync(out) && statSync(out).size > 1000) return `/uploads/${name}`;
+  for (const seek of ["1", "0"]) {
+    const ok = await runBinary("ffmpeg", ["-y", "-loglevel", "error", "-ss", seek, "-i", file, "-frames:v", "1",
+      "-vf", "scale='min(720,iw)':-2", "-q:v", "4", out], 120000);
+    if (ok && existsSync(out) && statSync(out).size > 1000) return `/uploads/${name}`;
+  }
+  try { if (existsSync(out)) unlinkSync(out); } catch { /* ignore */ }
+  return null;
+};
+
+/** Attach a freshly generated poster to any post already referencing the video. */
+const linkPosterToPosts = (videoUrl: string, posterUrl: string) => {
+  try {
+    const rows = db.prepare("SELECT id, mediaUrls, thumbnailUrl FROM posts WHERE mediaUrls LIKE ?").all(`%${videoUrl}%`) as any[];
+    for (const r of rows) {
+      let urls: unknown = [];
+      try { urls = JSON.parse(r.mediaUrls || "[]"); } catch { continue; }
+      if (!Array.isArray(urls) || !urls.includes(videoUrl)) continue;
+      if (r.thumbnailUrl) continue;
+      db.prepare("UPDATE posts SET thumbnailUrl = ? WHERE id = ? AND (thumbnailUrl IS NULL OR thumbnailUrl = '')").run(posterUrl, r.id);
+    }
+  } catch (e) {
+    console.warn("[MEDIA] poster link failed:", e);
+  }
+};
+
+const mediaQueue: string[] = [];
+let mediaBusy = false;
+
+const drainMediaQueue = async (): Promise<void> => {
+  if (mediaBusy) return;
+  const file = mediaQueue.shift();
+  if (!file) return;
+  mediaBusy = true;
+  try {
+    if (!hasFfmpeg() || !existsSync(file)) return;
+    if (isVideoPath(file)) {
+      const duration = await probeVideoDuration(file);
+      if (duration === null) {
+        console.warn(`[MEDIA] unplayable upload kept for review (no index/moov): ${path.basename(file)}`);
+        return;
+      }
+      if (path.extname(file).toLowerCase() === ".mp4") await ensureFaststart(file);
+      const poster = await generateVideoPoster(file);
+      if (poster) linkPosterToPosts(`/uploads/${path.basename(file)}`, poster);
+    } else {
+      await generateVideoPoster(file);
+    }
+  } catch (e) {
+    console.warn("[MEDIA] processing failed:", e);
+  } finally {
+    mediaBusy = false;
+    if (mediaQueue.length) setTimeout(() => { void drainMediaQueue(); }, 50);
+  }
+};
+
+const enqueueMediaProcessing = (file: string) => {
+  mediaQueue.push(file);
+  setTimeout(() => { void drainMediaQueue(); }, 10);
+};
+
+
+const parseTenantSettings = (raw: any): any => {
+  if (typeof raw === "string") {
+    try { return JSON.parse(raw || "{}"); } catch { return {}; }
+  }
+  return raw || {};
+};
+
+const mergeTenantProfileSettings = (existingRaw: any, incoming: any, isNew: boolean): any => {
+  const current = parseTenantSettings(existingRaw);
+  const merged = { ...current, ...parseTenantSettings(incoming) };
+  if (isNew) {
+    delete merged.clientToken;
+    delete merged.internalToken;
+  } else {
+    merged.clientToken = current.clientToken;
+    merged.internalToken = current.internalToken;
+  }
+  return merged;
+};
+
+/** Never put workspace tokens on a payload a client browser can read. */
+const tenantPublic = (row: any) => {
+  if (!row) return row;
+  const settings = parseTenantSettings(row.settings);
+  return { ...row, settings: { theme: settings.theme } };
+};
+
+const isStaffUploadRequest = (req: any): boolean => {
+  if (getSession(getToken(req))) return true;
+  const passed = String(req.headers["x-tenant-token"] || req.query.token || "");
+  if (!passed) return false;
+  const tenants = db.prepare("SELECT settings FROM tenants").all() as any[];
+  for (const t of tenants) {
+    const s = parseTenantSettings(t.settings);
+    if (passed === s.internalToken) return true;
+  }
+  return false;
+};
+
+const requireStaffUpload = (req: any, res: any): boolean => {
+  if (isStaffUploadRequest(req)) return true;
+  res.status(401).json({ error: "Unauthorized: login or workspace token required to upload" });
+  return false;
+};
+
 async function startServer() {
   const app = express();
   const PORT = parseInt(process.env.PORT || "3000", 10);
@@ -854,7 +1247,37 @@ async function startServer() {
   app.use(cookieParser());
 
   // Serve uploaded files
-  app.use("/uploads", express.static(UPLOADS_DIR));
+  // Serve uploaded files with Range request support for video streaming
+  app.use("/uploads", (_req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    // CORS for video crossOrigin="anonymous" and Range requests
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges");
+    res.setHeader("Accept-Ranges", "bytes");
+    next();
+  }, express.static(UPLOADS_DIR, {
+    // Enable Range requests for video seeking
+    etag: true,
+    lastModified: true,
+    maxAge: "1y",
+    immutable: true,
+    setHeaders: (res, filePath) => {
+      // Explicit video MIME types for proper playback
+      const ext = path.extname(filePath).toLowerCase();
+      const videoTypes: Record<string, string> = {
+        ".mp4": "video/mp4",
+        ".mov": "video/quicktime",
+        ".webm": "video/webm",
+        ".avi": "video/x-msvideo",
+        ".mkv": "video/x-matroska",
+        ".m4v": "video/x-m4v",
+      };
+      if (videoTypes[ext]) {
+        res.setHeader("Content-Type", videoTypes[ext]);
+      }
+    }
+  }));
+
 
   const httpServer = createServer(app);
   const io = new Server(httpServer, {
@@ -872,6 +1295,7 @@ async function startServer() {
 
   // ── Upload (NO GLOBAL BODY PARSERS BEFORE THIS) ─────────────
   app.post("/api/upload", (req, res) => {
+    if (!requireStaffUpload(req, res)) return;
     req.setTimeout(1800000);
     res.setTimeout(1800000);
     const contentLength = req.headers["content-length"];
@@ -890,12 +1314,14 @@ async function startServer() {
         return res.status(400).json({ error: "No file uploaded" });
       }
       console.log(`[UPLOAD] Success: ${req.file.filename} (${req.file.size} bytes)`);
+      enqueueMediaProcessing(req.file.path);
       res.json({ url: `/uploads/${req.file.filename}`, filename: req.file.filename, size: req.file.size });
     });
   });
 
   // ── Chunked upload (bypasses Cloudflare 100MB limit) ─────────
   app.post("/api/upload-chunk", (req, res) => {
+    if (!requireStaffUpload(req, res)) return;
     req.setTimeout(300000); // 5 min per chunk
     res.setTimeout(300000);
     uploadChunk.single("file")(req, res, (err) => {
@@ -916,30 +1342,40 @@ async function startServer() {
   });
 
   app.post("/api/upload-complete", express.json({ limit: "1mb" }), async (req, res) => {
-    const { uploadId, totalChunks, originalFilename } = req.body || {};
-    if (!uploadId || totalChunks == null || !originalFilename) {
+    if (!requireStaffUpload(req, res)) return;
+    const { rawUploadId, uploadId: bodyUploadId, totalChunks, originalFilename } = req.body || {};
+    const uploadId = String(rawUploadId || bodyUploadId || "").replace(/[^a-zA-Z0-9_-]/g, "_");
+    const chunks = Number(totalChunks);
+    if (!uploadId || !originalFilename || !Number.isInteger(chunks) || chunks < 1) {
       return res.status(400).json({ error: "Missing uploadId, totalChunks, or originalFilename" });
+    }
+    if (chunks > MAX_UPLOAD_CHUNKS) {
+      return res.status(400).json({ error: `Too many chunks (max ${MAX_UPLOAD_CHUNKS})` });
+    }
+    const ext = path.extname(String(originalFilename)).toLowerCase();
+    if (!ALLOWED_UPLOAD_EXT.includes(ext)) {
+      return res.status(400).json({ error: `Unsupported file type: ${ext}` });
     }
     const chunkDir = path.join(CHUNKS_DIR, uploadId);
     if (!existsSync(chunkDir)) {
       return res.status(400).json({ error: "No chunks found for this upload" });
     }
-    const ext = path.extname(originalFilename).toLowerCase();
     const finalFilename = `${Date.now()}-${randomUUID()}${ext}`;
     const finalPath = path.join(UPLOADS_DIR, finalFilename);
     try {
       const out = createWriteStream(finalPath);
-      for (let i = 0; i < totalChunks; i++) {
+      for (let i = 0; i < chunks; i++) {
         const chunkPath = path.join(chunkDir, `chunk-${String(i).padStart(5, "0")}`);
         if (!existsSync(chunkPath)) {
           out.destroy();
           if (existsSync(finalPath)) unlinkSync(finalPath);
           return res.status(400).json({ error: `Missing chunk ${i}` });
         }
-        await pipeline(createReadStream(chunkPath), out, { end: i === totalChunks - 1 });
+        await pipeline(createReadStream(chunkPath), out, { end: i === chunks - 1 });
       }
       rmSync(chunkDir, { recursive: true });
       console.log(`[UPLOAD-COMPLETE] ${uploadId} → ${finalFilename}`);
+      enqueueMediaProcessing(finalPath);
       res.json({ url: `/uploads/${finalFilename}`, filename: finalFilename });
     } catch (e: any) {
       console.error(`[UPLOAD-COMPLETE] Error:`, e);
@@ -949,8 +1385,8 @@ async function startServer() {
   });
 
   // ── Global Body Parsers (Applied AFTER the upload route) ─────
-  app.use(express.json({ limit: "500mb" }));
-  app.use(express.urlencoded({ limit: "500mb", extended: true }));
+  app.use(express.json({ limit: "1mb" }));
+  app.use(express.urlencoded({ limit: "1mb", extended: true }));
 
   // ── Rate Limiting (Simple) ────────────────────────────────
   const rateLimits = new Map<string, { count: number, reset: number }>();
@@ -1192,7 +1628,24 @@ async function startServer() {
   app.get("/api/tenants", (req, res) => {
     if (!requireAuth(req, res)) return;
     const tenants = db.prepare("SELECT * FROM tenants").all();
-    res.json(tenants.map((t: any) => ({ ...t, settings: JSON.parse(t.settings || "{}") })));
+    res.json(tenants.map((t: any) => tenantPublic({ ...t, settings: parseTenantSettings(t.settings) })));
+  });
+
+  app.get("/api/tenants/:id/invite", (req, res) => {
+    if (!requireRole(req, res, ["graphic-designer", "marketing-team", "reviewer"])) return;
+    const { id } = req.params;
+    const tenant = db.prepare("SELECT * FROM tenants WHERE id = ?").get(id) as any;
+    if (!tenant) return res.status(404).json({ error: "Tenant not found" });
+    const settings = parseTenantSettings(tenant.settings);
+    const origin = publicOrigin(req);
+    res.json({
+      tenantId: id,
+      name: tenant.name,
+      clientToken: settings.clientToken || "",
+      internalToken: settings.internalToken || "",
+      clientUrl: `${origin}/client/${id}?token=${settings.clientToken || ""}`,
+      agencyUrl: `${origin}/agency/${id}?token=${settings.internalToken || ""}`,
+    });
   });
 
   app.delete("/api/tenants/:id", (req, res) => {
@@ -1234,7 +1687,7 @@ async function startServer() {
     if (tokenType === "internal" || tokenType === "both") settings.internalToken = randomUUID();
     db.prepare("UPDATE tenants SET settings = ? WHERE id = ?").run(JSON.stringify(settings), id);
     const updated = { ...tenant, settings };
-    io.emit("tenant-updated", updated);
+    io.emit("tenant-updated", tenantPublic(updated));
     res.json({ success: true, settings });
   });
 
@@ -1262,6 +1715,7 @@ async function startServer() {
       totalBlocked: allPosts.filter((p: any) => p.isBlocked).length,
       totalNeedsReview: allPosts.filter((p: any) => p.clientStatus === "Needs Your Review").length,
       totalScheduled: allPosts.filter((p: any) => p.internalStatus === "Scheduled").length,
+      totalReadyToSchedule: allPosts.filter((p: any) => p.internalStatus === "Ready to Schedule").length,
       perTenant,
     });
   });
@@ -1278,7 +1732,7 @@ async function startServer() {
 
     // Status pipeline funnel
     const statusCounts: Record<string, number> = {};
-    const statuses = ["Concept", "Draft", "Internal QA", "Ready for Client", "Changes Requested", "Approved", "Scheduled", "Posted"];
+    const statuses = ["Concept", "Draft", "Internal QA", "Ready for Client", "Changes Requested", "Approved", "Ready to Schedule", "Scheduled", "Posted"];
     statuses.forEach(s => statusCounts[s] = posts.filter((p: any) => p.internalStatus === s).length);
 
     // Content pillar mix
@@ -1286,7 +1740,7 @@ async function startServer() {
     posts.forEach((p: any) => { if (p.contentPillar) pillarCounts[p.contentPillar] = (pillarCounts[p.contentPillar] || 0) + 1; });
 
     // Format distribution
-    const formatCounts = { image: 0, carousel: 0, reel: 0 };
+    const formatCounts = { image: 0, carousel: 0, reel: 0, story: 0 };
     posts.forEach((p: any) => { if (p.format in formatCounts) (formatCounts as any)[p.format]++; });
 
     // Approval by week (last 8 weeks)
@@ -1312,14 +1766,19 @@ async function startServer() {
       weeklyApproval: Object.entries(weeklyApproval).sort().map(([week, count]) => ({ week, count })),
       clientStatus: clientStatusCounts,
       approvalRate: posts.length > 0 ? Math.round((clientStatusCounts.approved / posts.length) * 100) : 0,
+      operational: getOperationalAnalytics(posts),
     });
   });
 
   // ── CSV Export ────────────────────────────────────────────
   app.get("/api/export/posts", (req, res) => {
     if (!requireAuth(req, res)) return;
-    const { tenantId } = req.query as { tenantId: string };
-    const posts = db.prepare("SELECT * FROM posts WHERE tenantId = ?").all(tenantId) as any[];
+    const { tenantId, from, to } = req.query as { tenantId: string; from?: string; to?: string };
+    let query = "SELECT * FROM posts WHERE tenantId = ?";
+    const params: string[] = [tenantId];
+    if (from) { query += " AND date >= ?"; params.push(from); }
+    if (to) { query += " AND date <= ?"; params.push(to); }
+    const posts = db.prepare(query).all(...params) as any[];
     const headers = ["id", "title", "format", "date", "time", "clientStatus", "internalStatus",
       "assignee", "campaignCode", "contentPillar", "isBlocked", "blockedReason", "revisionCount"];
     const csv = [
@@ -1379,7 +1838,7 @@ async function startServer() {
   // Single-post client review link (scoped token; does not expose full client workspace)
   app.post("/api/tenants/:tenantId/posts/:postId/client-share", (req, res) => {
     const { tenantId, postId } = req.params;
-    if (!requireAgencyOrInternalStaff(req, res, tenantId)) return;
+    if (!requireAgencyMutator(req, res, tenantId)) return;
     const post = db.prepare("SELECT id FROM posts WHERE id = ? AND tenantId = ?").get(postId, tenantId);
     if (!post) return res.status(404).json({ error: "Post not found" });
     const rawDays = parseInt(String(req.body?.expiresInDays ?? "90"), 10);
@@ -1399,7 +1858,7 @@ async function startServer() {
 
   app.delete("/api/tenants/:tenantId/posts/:postId/client-share", (req, res) => {
     const { tenantId, postId } = req.params;
-    if (!requireAgencyOrInternalStaff(req, res, tenantId)) return;
+    if (!requireAgencyMutator(req, res, tenantId)) return;
     const tokens = db.prepare("SELECT token FROM post_client_shares WHERE postId = ? AND tenantId = ? AND revoked = 0").all(postId, tenantId) as { token: string }[];
     db.prepare("UPDATE post_client_shares SET revoked = 1 WHERE postId = ? AND tenantId = ?").run(postId, tenantId);
     for (const { token } of tokens) {
@@ -1411,7 +1870,7 @@ async function startServer() {
   // ── Share Sets REST ────────────────────────────────────────
   app.post("/api/tenants/:tenantId/share-sets", (req, res) => {
     const { tenantId } = req.params;
-    if (!requireAgencyOrInternalStaff(req, res, tenantId)) return;
+    if (!requireAgencyMutator(req, res, tenantId)) return;
     const { postIds, name, expiresInDays } = req.body || {};
     if (!Array.isArray(postIds) || postIds.length === 0) {
       return res.status(400).json({ error: "postIds array is required" });
@@ -1425,8 +1884,9 @@ async function startServer() {
         "INSERT INTO share_sets (id, tenantId, name, token, createdAt, expiresAt, revoked) VALUES (?,?,?,?,?,?,0)"
       ).run(id, tenantId, name || null, token, createdAt, expiresAt);
       const insertPost = db.prepare("INSERT INTO share_set_posts (shareSetId, postId) VALUES (?,?)");
+      const owned = db.prepare("SELECT id FROM posts WHERE id = ? AND tenantId = ?");
       for (const postId of postIds) {
-        insertPost.run(id, postId);
+        if (owned.get(postId, tenantId)) insertPost.run(id, postId);
       }
     })();
     const host = req.get("x-forwarded-host") || req.get("host") || `localhost:${PORT}`;
@@ -1450,12 +1910,18 @@ async function startServer() {
     const { tenantId } = req.params;
     if (!requireAgencyOrInternalStaff(req, res, tenantId)) return;
     const posts = db.prepare("SELECT * FROM posts WHERE tenantId = ? AND archivedAt IS NOT NULL").all(tenantId) as any[];
-    res.json(posts.map(p => ({ ...p, mediaUrls: JSON.parse(p.mediaUrls || "[]") })));
+    res.json(posts.map(p => ({
+      ...p,
+      mediaUrls: JSON.parse(p.mediaUrls || "[]"),
+      hashtags: typeof p.hashtags === "string" ? JSON.parse(p.hashtags || "[]") : (p.hashtags || []),
+    })));
   });
 
   app.delete("/api/share-sets/:id", (req, res) => {
-    if (!requireAuth(req, res)) return;
     const { id } = req.params;
+    const row = db.prepare("SELECT tenantId FROM share_sets WHERE id = ?").get(id) as { tenantId: string } | undefined;
+    if (!row) return res.status(404).json({ error: "Not found" });
+    if (!requireAgencyMutator(req, res, row.tenantId)) return;
     db.prepare("UPDATE share_sets SET revoked = 1 WHERE id = ?").run(id);
     res.json({ success: true });
   });
@@ -1475,7 +1941,7 @@ async function startServer() {
   app.delete("/api/posts/:id", (req, res) => {
     const { id } = req.params;
     const tenantId = (req.query.tenantId as string) || "acmecorp";
-    if (!requireTenantAuth(req, res, tenantId)) return;
+    if (!requireAgencyCreator(req, res, tenantId)) return;
     
     const shareTokens = getActiveShareTokensForPost(id);
     const post = db.prepare("SELECT mediaUrls, thumbnailUrl FROM posts WHERE id = ? AND tenantId = ?").get(id, tenantId) as any;
@@ -1483,6 +1949,7 @@ async function startServer() {
     for (const tkn of shareTokens) {
       io.to(`share:${tkn}`).emit("post-deleted", id);
     }
+    emitToShareSetRooms(io, id, "post-deleted", id);
     db.prepare("DELETE FROM posts WHERE id = ? AND tenantId = ?").run(id, tenantId);
     db.prepare("DELETE FROM comments WHERE postId = ?").run(id);
     db.prepare("DELETE FROM tasks WHERE postId = ?").run(id);
@@ -1494,6 +1961,8 @@ async function startServer() {
       } catch { }
     }
     io.to(tenantId).emit("post-deleted", id);
+    io.to(`${tenantId}:internal`).emit("post-deleted", id);
+    io.to(`${tenantId}:client`).emit("post-deleted", id);
     res.json({ success: true });
   });
 
@@ -1502,8 +1971,11 @@ async function startServer() {
     const { id } = req.params;
     const tenantId = (req.query.tenantId as string) || "acmecorp";
     const postId = req.query.postId as string;
-    if (!requireTenantAuth(req, res, tenantId)) return;
-
+    if (!requireAgencyMutator(req, res, tenantId)) return;
+    const owned = db.prepare(`
+      SELECT c.id FROM comments c JOIN posts p ON p.id = c.postId WHERE c.id = ? AND p.tenantId = ?
+    `).get(id, tenantId);
+    if (!owned) return res.status(404).json({ error: "Not found" });
     db.prepare("DELETE FROM comments WHERE id = ?").run(id);
     if (postId) broadcastPostUpdated(tenantId, postId);
     res.json({ success: true });
@@ -1514,8 +1986,11 @@ async function startServer() {
     const { id } = req.params;
     const tenantId = (req.query.tenantId as string) || "acmecorp";
     const postId = req.query.postId as string;
-    if (!requireTenantAuth(req, res, tenantId)) return;
-
+    if (!requireAgencyMutator(req, res, tenantId)) return;
+    const owned = db.prepare(`
+      SELECT t.id FROM tasks t JOIN posts p ON p.id = t.postId WHERE t.id = ? AND p.tenantId = ?
+    `).get(id, tenantId);
+    if (!owned) return res.status(404).json({ error: "Not found" });
     db.prepare("DELETE FROM tasks WHERE id = ?").run(id);
     if (postId) broadcastPostUpdated(tenantId, postId);
     res.json({ success: true });
@@ -1559,7 +2034,14 @@ async function startServer() {
   // ── Agency Users REST (login accounts, super-admin only) ────
   app.get("/api/agency-users", (req, res) => {
     if (!requireSuperAdmin(req, res)) return;
-    res.json(db.prepare("SELECT id, username, role, createdAt FROM agency_users").all());
+    const rows = db.prepare("SELECT id, username, role, createdAt, passwordHash FROM agency_users").all() as any[];
+    res.json(rows.map((u) => ({
+      id: u.id,
+      username: u.username,
+      role: u.role,
+      createdAt: u.createdAt,
+      hasPassword: !!(u.passwordHash && String(u.passwordHash).length > 0),
+    })));
   });
 
   app.post("/api/agency-users", (req, res) => {
@@ -1567,15 +2049,21 @@ async function startServer() {
     const { username, password, role } = req.body;
     if (!username || !String(username).trim()) return res.status(400).json({ error: "email / username required" });
     const uname = normalizeUsername(username);
-    const r = (role && ALL_AGENCY_ROLES.includes(role as AgencyRole)) ? role : "user";
+    const r = (role && ALL_AGENCY_ROLES.includes(role as AgencyRole)) ? role : "graphic-designer";
     const existing = db.prepare("SELECT id FROM agency_users WHERE lower(username) = lower(?)").get(uname);
     if (existing) return res.status(400).json({ error: "Username already exists" });
     const id = randomUUID();
     const passwordHash = password && String(password).trim() ? hashPassword(String(password).trim()) : "";
     db.prepare("INSERT INTO agency_users (id, username, passwordHash, role, createdAt) VALUES (?,?,?,?,?)")
       .run(id, uname, passwordHash, r, new Date().toISOString());
-    const u = db.prepare("SELECT id, username, role, createdAt FROM agency_users WHERE id = ?").get(id);
-    res.json(u);
+    const created = db.prepare("SELECT id, username, role, createdAt, passwordHash FROM agency_users WHERE id = ?").get(id) as any;
+    res.json({
+      id: created.id,
+      username: created.username,
+      role: created.role,
+      createdAt: created.createdAt,
+      hasPassword: !!(created.passwordHash && String(created.passwordHash).length > 0),
+    });
   });
 
   app.patch("/api/agency-users/:id", (req, res) => {
@@ -1589,13 +2077,139 @@ async function startServer() {
     if (updates.length === 0) return res.status(400).json({ error: "No valid fields to update" });
     params.push(req.params.id);
     db.prepare(`UPDATE agency_users SET ${updates.join(", ")} WHERE id = ?`).run(...params);
-    const u = db.prepare("SELECT id, username, role, createdAt FROM agency_users WHERE id = ?").get(req.params.id);
-    res.json(u);
+    const updated = db.prepare("SELECT id, username, role, createdAt, passwordHash FROM agency_users WHERE id = ?").get(req.params.id) as any;
+    res.json({
+      id: updated.id,
+      username: updated.username,
+      role: updated.role,
+      createdAt: updated.createdAt,
+      hasPassword: !!(updated.passwordHash && String(updated.passwordHash).length > 0),
+    });
   });
 
   app.delete("/api/agency-users/:id", (req, res) => {
-    if (!requireSuperAdmin(req, res)) return;
+    const auth = requireSuperAdmin(req, res);
+    if (!auth) return;
+    if (req.params.id === auth.user.userId) {
+      return res.status(400).json({ error: "You cannot delete your own account" });
+    }
+    const target = db.prepare("SELECT id, role FROM agency_users WHERE id = ?").get(req.params.id) as any;
+    if (!target) return res.status(404).json({ error: "Not found" });
+    if (target.role === "super-admin") {
+      const n = (db.prepare("SELECT COUNT(*) as c FROM agency_users WHERE role = 'super-admin'").get() as any).c;
+      if (n <= 1) return res.status(400).json({ error: "Cannot delete the last super-admin" });
+    }
     db.prepare("DELETE FROM agency_users WHERE id = ?").run(req.params.id);
+    res.json({ success: true });
+  });
+
+  app.get("/api/mcp-tokens", (req, res) => {
+    if (!requireSuperAdmin(req, res)) return;
+    const rows = db.prepare(`
+      SELECT t.id, t.name, t.prefix, t.role, t.createdAt, t.lastUsedAt, t.expiresAt, t.revoked, t.userId, u.username
+      FROM mcp_tokens t
+      LEFT JOIN agency_users u ON u.id = t.userId
+      ORDER BY t.createdAt DESC
+    `).all();
+    res.json(rows);
+  });
+
+  app.post("/api/mcp-tokens", (req, res) => {
+    if (!requireSuperAdmin(req, res)) return;
+    const { name, userId, role, expiresInDays } = req.body || {};
+    if (!name || !String(name).trim()) return res.status(400).json({ error: "name required" });
+    if (!userId) return res.status(400).json({ error: "userId required" });
+    const user = db.prepare("SELECT id, username, role FROM agency_users WHERE id = ?").get(userId) as any;
+    if (!user) return res.status(404).json({ error: "User not found" });
+    const rank: Record<string, number> = { user: 0, reviewer: 1, "marketing-team": 2, "graphic-designer": 3, "super-admin": 4 };
+    const requested = (role && ALL_AGENCY_ROLES.includes(role) ? role : user.role) as AgencyRole;
+    if ((rank[requested] ?? 0) > (rank[user.role] ?? 0)) {
+      return res.status(400).json({ error: "Cannot mint a stronger role than the bound user" });
+    }
+    const days = [30, 90, 365].includes(Number(expiresInDays)) ? Number(expiresInDays) : 90;
+    const expiresAt = new Date(Date.now() + days * 86400000).toISOString();
+    const minted = generateMcpToken();
+    const id = randomUUID();
+    const createdAt = new Date().toISOString();
+    db.prepare(`INSERT INTO mcp_tokens (id, userId, name, tokenHash, prefix, role, createdAt, revoked, expiresAt)
+      VALUES (?,?,?,?,?,?,?,0,?)`)
+      .run(id, user.id, String(name).trim(), minted.tokenHash, minted.prefix, requested, createdAt, expiresAt);
+    res.json({
+      id, name: String(name).trim(), prefix: minted.prefix, role: requested, userId: user.id,
+      username: user.username, createdAt, expiresAt, revoked: 0, token: minted.token,
+    });
+  });
+
+  app.delete("/api/mcp-tokens/:id", (req, res) => {
+    if (!requireSuperAdmin(req, res)) return;
+    db.prepare("UPDATE mcp_tokens SET revoked = 1 WHERE id = ?").run(req.params.id);
+    res.json({ success: true });
+  });
+
+  app.get("/api/updates", (req, res) => {
+    const auth = requireAuth(req, res);
+    if (!auth) return;
+    const includeUnpublished = req.query.all === "1" && auth.user.role === "super-admin";
+    const rows = db.prepare(`
+      SELECT u.id, u.title, u.body, u.published, u.createdAt, u.createdBy, a.username as authorName,
+        CASE WHEN r.updateId IS NULL THEN 0 ELSE 1 END as read
+      FROM product_updates u
+      LEFT JOIN agency_users a ON a.id = u.createdBy
+      LEFT JOIN product_update_reads r ON r.updateId = u.id AND r.userId = ?
+      ${includeUnpublished ? "" : "WHERE u.published = 1"}
+      ORDER BY u.createdAt DESC
+      LIMIT 50
+    `).all(auth.user.userId);
+    res.json(rows);
+  });
+
+  app.get("/api/updates/unread-count", (req, res) => {
+    const auth = requireAuth(req, res);
+    if (!auth) return;
+    const row = db.prepare(`
+      SELECT COUNT(*) as c FROM product_updates u
+      LEFT JOIN product_update_reads r ON r.updateId = u.id AND r.userId = ?
+      WHERE u.published = 1 AND r.updateId IS NULL
+    `).get(auth.user.userId) as { c: number };
+    res.json({ count: row?.c || 0 });
+  });
+
+  app.post("/api/updates", (req, res) => {
+    const auth = requireSuperAdmin(req, res);
+    if (!auth) return;
+    const title = String(req.body?.title || "").trim();
+    const body = String(req.body?.body || "").trim();
+    if (!title || !body) return res.status(400).json({ error: "title and body required" });
+    if (title.length > 120) return res.status(400).json({ error: "title too long" });
+    if (body.length > 8000) return res.status(400).json({ error: "body too long" });
+    const id = randomUUID();
+    const createdAt = new Date().toISOString();
+    const published = req.body?.published === false ? 0 : 1;
+    db.prepare("INSERT INTO product_updates (id, title, body, published, createdAt, createdBy) VALUES (?,?,?,?,?,?)")
+      .run(id, title, body, published, createdAt, auth.user.userId);
+    res.json({ id, title, body, published, createdAt, createdBy: auth.user.userId, authorName: auth.user.username, read: 0 });
+  });
+
+  app.patch("/api/updates/:id", (req, res) => {
+    if (!requireSuperAdmin(req, res)) return;
+    const existing = db.prepare("SELECT * FROM product_updates WHERE id = ?").get(req.params.id) as any;
+    if (!existing) return res.status(404).json({ error: "Not found" });
+    const published = typeof req.body?.published === "boolean" ? (req.body.published ? 1 : 0) : existing.published;
+    const title = req.body?.title != null ? String(req.body.title).trim() : existing.title;
+    const body = req.body?.body != null ? String(req.body.body).trim() : existing.body;
+    db.prepare("UPDATE product_updates SET title=?, body=?, published=? WHERE id=?").run(title, body, published, req.params.id);
+    res.json({ ...existing, title, body, published });
+  });
+
+  app.post("/api/updates/read", (req, res) => {
+    const auth = requireAuth(req, res);
+    if (!auth) return;
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.filter((id: unknown) => typeof id === "string") : [];
+    const now = new Date().toISOString();
+    const ins = db.prepare("INSERT OR IGNORE INTO product_update_reads (userId, updateId, readAt) VALUES (?,?,?)");
+    db.transaction(() => {
+      for (const id of ids.slice(0, 50)) ins.run(auth.user.userId, id, now);
+    })();
     res.json({ success: true });
   });
 
@@ -1629,17 +2243,19 @@ async function startServer() {
 
   // ── Broadcast helpers ─────────────────────────────────────
   const broadcastPostUpdated = (tenantId: string, postId: string) => {
-    const full = getPosts(tenantId).find((p) => p.id === postId);
-    const stripped = getClientPosts(tenantId).find((p) => p.id === postId);
+    const full = getPostById(tenantId, postId);
+    const stripped = full && !full.archivedAt ? getClientPosts(tenantId).find((p) => p.id === postId) : undefined;
     if (full) io.to(`${tenantId}:internal`).emit("post-updated", full);
     if (stripped) {
       io.to(`${tenantId}:client`).emit("post-updated", stripped);
-    } else if (full && !isPostVisibleOnClientLink(full)) {
-      // Internal users also join the client room; use a client-only event (not post-deleted).
+    } else if (full && (!isPostVisibleOnClientLink(full) || full.archivedAt)) {
       io.to(`${tenantId}:client`).emit("client-post-removed", postId);
     }
-    const shareStrip = getPostStripForShare(tenantId, postId);
-    if (shareStrip) emitToPostShareRooms(io, postId, "post-updated", shareStrip);
+    const shareStrip = full && !full.archivedAt ? getPostStripForShare(tenantId, postId) : null;
+    if (shareStrip) {
+      emitToPostShareRooms(io, postId, "post-updated", shareStrip);
+      emitToShareSetRooms(io, postId, "post-updated", shareStrip);
+    }
   };
 
   const broadcastPostCreated = (tenantId: string, postId: string) => {
@@ -1651,7 +2267,7 @@ async function startServer() {
 
   const broadcastInitialData = (tenantId: string) => {
     const tenant = db.prepare("SELECT * FROM tenants WHERE id = ?").get(tenantId) as any;
-    const parsedTenant = tenant ? { ...tenant, settings: JSON.parse(tenant.settings || "{}") } : null;
+    const parsedTenant = tenant ? tenantPublic({ ...tenant, settings: JSON.parse(tenant.settings || "{}") }) : null;
     io.to(`${tenantId}:internal`).emit("initial-data", { posts: getPosts(tenantId), tenant: parsedTenant });
     io.to(`${tenantId}:client`).emit("initial-data", { posts: getClientPosts(tenantId), tenant: parsedTenant });
   };
@@ -1661,27 +2277,56 @@ async function startServer() {
     
     // Global Event Authorization Middleware
     socket.use(([event, ...args], next) => {
-      // Allow connection and admin-level events to bypass tenant check
-      if (["join-tenant", "join-post-share", "join-share-set", "upsert-tenant", "delete-tenant", "disconnect"].includes(event)) {
+      if ([
+        "join-tenant", "join-post-share", "join-share-set",
+        "upsert-tenant",
+        "create-campaign", "update-campaign", "delete-campaign",
+        "create-pillar", "delete-pillar",
+        "disconnect",
+      ].includes(event)) {
         return next();
       }
 
-      const data = args[0];
-      const shareScope = (socket as any).shareScope as { tenantId: string; postId: string } | undefined;
-      // If the event payload contains a tenantId, verify the socket actually belongs to that tenant's room
-      if (data && data.tenantId && !socket.rooms.has(data.tenantId)) {
-        if (!shareScope || shareScope.tenantId !== data.tenantId) {
+      const data = args[0] || {};
+      const actor = (socket as any).actor as SocketActor | undefined;
+      if (!actor) {
+        console.warn(`[SECURITY] Blocked unauthenticated socket event: ${event}`);
+        socket.emit("error", "Unauthorized: Join a workspace first.");
+        return next(new Error("Unauthorized"));
+      }
+      if (data && data.tenantId) {
+        if (!actor || actor.tenantId !== data.tenantId) {
           console.warn(`[SECURITY] Blocked unauthorized socket event: ${event} for tenant ${data.tenantId}`);
           socket.emit("error", "Unauthorized: You do not have access to this tenant.");
           return next(new Error("Unauthorized"));
         }
         const postIdInPayload = data.post?.id ?? data.postId;
-        if (!postIdInPayload || postIdInPayload !== shareScope.postId) {
+        if (!actorAllowsPost(actor, postIdInPayload)) {
           console.warn(`[SECURITY] Blocked share-scoped socket event: ${event} for wrong post`);
-          socket.emit("error", "Unauthorized: This action is not allowed from a single-post review link.");
+          socket.emit("error", "Unauthorized: This action is not allowed from this review link.");
           return next(new Error("Unauthorized"));
         }
-        return next();
+        if (actorIsClientLike(actor) && !CLIENT_SAFE_EVENTS.has(event)) {
+          console.warn(`[SECURITY] Blocked client-unsafe socket event: ${event}`);
+          socket.emit("error", "Unauthorized: Clients cannot perform this action.");
+          return next(new Error("Unauthorized"));
+        }
+        if ((event === "create-post" || event === "create-posts-bulk" || event === "delete-post") && !actorCanCreate(actor)) {
+          socket.emit("error", "Unauthorized: Insufficient permissions.");
+          return next(new Error("Unauthorized"));
+        }
+        if (event === "update-post" && !actorCanUpdatePost(actor)) {
+          socket.emit("error", "Unauthorized: Insufficient permissions.");
+          return next(new Error("Unauthorized"));
+        }
+        if ((event === "add-task" || event === "delete-task" || event === "toggle-task") && !actorCanMutateTasks(actor)) {
+          socket.emit("error", "Unauthorized: Insufficient permissions.");
+          return next(new Error("Unauthorized"));
+        }
+        if (event === "delete-comment" && !actorCanDeleteComment(actor)) {
+          socket.emit("error", "Unauthorized: Insufficient permissions.");
+          return next(new Error("Unauthorized"));
+        }
       }
       next();
     });
@@ -1706,6 +2351,10 @@ async function startServer() {
       }
 
       const parsedTenant = tenant ? { ...tenant, settings: JSON.parse(tenant.settings || "{}") } : null;
+      if (!parsedTenant) {
+        socket.emit("error", "Workspace not found.");
+        return;
+      }
 
       if (mode === "client") {
         if (parsedTenant && passedToken !== parsedTenant.settings.clientToken) {
@@ -1715,25 +2364,32 @@ async function startServer() {
         // Update lastActive
         const now = new Date().toISOString();
         db.prepare("UPDATE tenants SET lastActive = ? WHERE id = ?").run(now, tenantId);
-        io.emit("tenant-updated", { ...parsedTenant, lastActive: now });
+        io.emit("tenant-updated", tenantPublic({ ...parsedTenant, lastActive: now }));
 
-        socket.join(tenantId);
+        (socket as any).actor = { kind: "client", tenantId } as SocketActor;
         socket.join(clientRoom);
-        socket.emit("initial-data", { posts: getClientPosts(tenantId), tenant: { ...parsedTenant, lastActive: now } });
+        socket.emit("initial-data", { posts: getClientPosts(tenantId), tenant: tenantPublic({ ...parsedTenant, lastActive: now }) });
       } else {
-        if (parsedTenant && passedToken !== parsedTenant.settings.internalToken) {
+        const handshakeToken =
+          typeof (socket as any).handshake?.auth?.token === "string"
+            ? String((socket as any).handshake.auth.token)
+            : "";
+        const staffSession = getSession(passedToken) || getSession(handshakeToken);
+        if (parsedTenant && !staffSession && passedToken !== parsedTenant.settings.internalToken) {
           socket.emit("error", "Invalid or missing secure Internal Token.");
           return;
         }
         // Update lastActive for internal join too
         const now = new Date().toISOString();
         db.prepare("UPDATE tenants SET lastActive = ? WHERE id = ?").run(now, tenantId);
-        io.emit("tenant-updated", { ...parsedTenant, lastActive: now });
+        io.emit("tenant-updated", tenantPublic({ ...parsedTenant, lastActive: now }));
 
+        (socket as any).actor = staffSession
+          ? ({ kind: "staff", tenantId, role: staffSession.role } as SocketActor)
+          : ({ kind: "magic-internal", tenantId, role: "graphic-designer" } as SocketActor);
         socket.join(tenantId);
-        socket.join(clientRoom); // Join both so we get all updates
         socket.join(internalRoom);
-        socket.emit("initial-data", { posts: getPosts(tenantId), tenant: { ...parsedTenant, lastActive: now } });
+        socket.emit("initial-data", { posts: getPosts(tenantId), tenant: tenantPublic({ ...parsedTenant, lastActive: now }) });
       }
     });
 
@@ -1768,14 +2424,15 @@ async function startServer() {
         },
       };
       (socket as any).shareScope = { tenantId: row.tenantId, postId: row.postId, shareToken: row.token };
+      (socket as any).actor = { kind: "share", tenantId: row.tenantId, postIds: [row.postId] } as SocketActor;
       socket.join(`share:${row.token}`);
       const strip = getPostStripForShare(row.tenantId, row.postId);
       const posts = strip ? [strip] : [];
       socket.emit("initial-data", { posts, tenant: tenantForClient, sharePostId: row.postId });
     });
 
-    socket.on("join-share-set", (payload: { token?: string }) => {
-      const shareSetToken = (payload?.token || "").trim();
+    socket.on("join-share-set", (payload: { token?: string; shareSetToken?: string }) => {
+      const shareSetToken = (payload?.token || payload?.shareSetToken || "").trim();
       if (!shareSetToken) {
         socket.emit("error", "Missing share set token.");
         return;
@@ -1799,9 +2456,12 @@ async function startServer() {
         settings: { theme: parsed.theme },
       };
       const postIds = db.prepare("SELECT postId FROM share_set_posts WHERE shareSetId = ?").all(set.id) as { postId: string }[];
-      const posts = postIds
-        .map((row) => getPostStripForShare(set.tenantId, row.postId))
+      const ids = postIds.map((row) => row.postId);
+      const posts = ids
+        .map((postId) => getPostStripForShare(set.tenantId, postId))
         .filter((p) => p !== null);
+      (socket as any).shareScope = { tenantId: set.tenantId, postIds: ids, shareSetToken: set.token };
+      (socket as any).actor = { kind: "share-set", tenantId: set.tenantId, postIds: ids } as SocketActor;
       socket.join(`share-set:${set.token}`);
       socket.emit("initial-data", { posts, tenant: tenantForClient, shareSetId: set.id });
     });
@@ -1813,13 +2473,13 @@ async function startServer() {
       const clientStatus = deriveClientStatus(internalStatus, post.clientStatus);
       db.prepare(`INSERT INTO posts (id, tenantId, title, format, mediaUrls, caption, hashtags,
         date, time, clientStatus, internalStatus, assignee, campaignCode, contentPillar,
-        internalNotes, assetLineage, isBlocked, blockedReason, thumbnailUrl, revisionCount) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+        internalNotes, assetLineage, isBlocked, blockedReason, thumbnailUrl, revisionCount, dueDate, sortOrder) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
         .run(id, tenantId, post.title, post.format, JSON.stringify(post.mediaUrls || []),
           post.caption || "", JSON.stringify(post.hashtags || []), post.date, post.time,
           clientStatus, internalStatus,
           post.assignee || "Unassigned", post.campaignCode || "", post.contentPillar || "",
           post.internalNotes || "", post.assetLineage || "", post.isBlocked ? 1 : 0, post.blockedReason || null,
-          post.thumbnailUrl || null, 0);
+          post.thumbnailUrl || null, 0, post.dueDate || null, post.sortOrder ?? nextSortOrder(tenantId));
       logActivity(tenantId, "post-created", post.title, `New post created in ${post.internalStatus} status`);
       io.to(tenantId).emit("activity", { action: "post-created", subject: post.title, tenantId, timestamp: new Date().toISOString() });
       broadcastPostCreated(tenantId, id);
@@ -1834,13 +2494,13 @@ async function startServer() {
           const clientStatus = deriveClientStatus(internalStatus, post.clientStatus);
           db.prepare(`INSERT INTO posts (id, tenantId, title, format, mediaUrls, caption, hashtags,
             date, time, clientStatus, internalStatus, assignee, campaignCode, contentPillar,
-            internalNotes, assetLineage, isBlocked, blockedReason, thumbnailUrl, revisionCount) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+            internalNotes, assetLineage, isBlocked, blockedReason, thumbnailUrl, revisionCount, dueDate, sortOrder) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
             .run(id, tenantId, post.title, post.format, JSON.stringify(post.mediaUrls || []),
               post.caption || "", JSON.stringify(post.hashtags || []), post.date, post.time,
               clientStatus, internalStatus,
               post.assignee || "Unassigned", post.campaignCode || "", post.contentPillar || "",
               post.internalNotes || "", post.assetLineage || "", post.isBlocked ? 1 : 0, post.blockedReason || null,
-              post.thumbnailUrl || null, 0);
+              post.thumbnailUrl || null, 0, post.dueDate || null, post.sortOrder ?? nextSortOrder(tenantId));
         }
       })();
       logActivity(tenantId, "bulk-upload", `${posts.length} posts`, `Bulk upload of ${posts.length} posts`);
@@ -1855,22 +2515,20 @@ async function startServer() {
       try {
         db.transaction(() => {
           // Increment revisionCount if status moves to Changes Requested
-          const existing = db.prepare("SELECT internalStatus, clientStatus, revisionCount FROM posts WHERE id = ? AND tenantId = ?").get(post.id, tenantId) as any;
+          const existing = db.prepare("SELECT * FROM posts WHERE id = ? AND tenantId = ?").get(post.id, tenantId) as any;
           if (!existing) return;
 
-          let internalStatus = post.internalStatus || existing.internalStatus || "Draft";
+          const actor = (socket as any).actor as SocketActor | undefined;
+          const isClientSession = !!(actor && actorIsClientLike(actor));
 
-          // ── Client auto-advance ─────────────────────────────────────────
-          // When a client session (share link or client-mode join) updates clientStatus,
-          // automatically advance the internalStatus to match.
-          const shareScope = (socket as any).shareScope as { tenantId: string; postId: string } | undefined;
-          const isClientSession = !!shareScope || (
-            socket.rooms.has(`${tenantId}:client`) && !socket.rooms.has(`${tenantId}:internal`)
-          );
+          let internalStatus = post.internalStatus || existing.internalStatus || "Draft";
           if (isClientSession) {
+            if (post.clientStatus !== "Approved" && post.clientStatus !== "Changes Requested") {
+              return;
+            }
             if (post.clientStatus === "Approved") {
               internalStatus = "Approved";
-            } else if (post.clientStatus === "Changes Requested") {
+            } else {
               internalStatus = "Changes Requested";
             }
           }
@@ -1881,34 +2539,47 @@ async function startServer() {
             revisionCount++;
           }
 
+          if (isClientSession) {
+            db.prepare(`UPDATE posts SET clientStatus=?, internalStatus=?, revisionCount=? WHERE id=? AND tenantId=?`)
+              .run(clientStatus, internalStatus, revisionCount, post.id, tenantId);
+          } else {
+          const parseJsonArr = (v: any) => {
+            if (Array.isArray(v)) return v;
+            try { return JSON.parse(v || "[]"); } catch { return []; }
+          };
+          const mediaUrls = Array.isArray(post.mediaUrls) ? post.mediaUrls : parseJsonArr(existing.mediaUrls);
+          const hashtags = Array.isArray(post.hashtags) ? post.hashtags : parseJsonArr(existing.hashtags);
           db.prepare(`UPDATE posts SET title=?, format=?, mediaUrls=?, caption=?, hashtags=?, date=?,
             time=?, clientStatus=?, internalStatus=?, assignee=?, campaignCode=?, contentPillar=?,
             internalNotes=?, assetLineage=?, isBlocked=?, blockedReason=?, thumbnailUrl=?,
-            scheduledAt=?, archivedAt=?, revisionCount=? WHERE id=? AND tenantId=?`)
+            scheduledAt=?, archivedAt=?, revisionCount=?, dueDate=?, sortOrder=? WHERE id=? AND tenantId=?`)
             .run(
-              post.title || "Untitled", 
-              post.format || "image", 
-              JSON.stringify(post.mediaUrls || []), 
-              post.caption || "",
-              JSON.stringify(post.hashtags || []), 
-              post.date || new Date().toISOString().split("T")[0], 
-              post.time || "00:00", 
+              post.title ?? existing.title ?? "Untitled",
+              post.format || existing.format || "image",
+              JSON.stringify(mediaUrls),
+              post.caption ?? existing.caption ?? "",
+              JSON.stringify(hashtags),
+              post.date || existing.date || new Date().toISOString().split("T")[0],
+              post.time || existing.time || "00:00",
               clientStatus,
-              internalStatus, 
-              post.assignee || "Unassigned", 
-              post.campaignCode || "", 
-              post.contentPillar || "",
-              post.internalNotes || "", 
-              post.assetLineage || "", 
-              post.isBlocked ? 1 : 0, 
-              post.blockedReason || null,
-              post.thumbnailUrl || null, 
-              post.scheduledAt || null, 
-              post.archivedAt ?? null, 
-              revisionCount, 
+              internalStatus,
+              post.assignee ?? existing.assignee ?? "Unassigned",
+              post.campaignCode ?? existing.campaignCode ?? "",
+              post.contentPillar ?? existing.contentPillar ?? "",
+              post.internalNotes ?? existing.internalNotes ?? "",
+              post.assetLineage ?? existing.assetLineage ?? "",
+              (post.isBlocked ?? existing.isBlocked) ? 1 : 0,
+              post.blockedReason ?? existing.blockedReason ?? null,
+              post.thumbnailUrl !== undefined ? (post.thumbnailUrl || null) : (existing.thumbnailUrl || null),
+              post.scheduledAt !== undefined ? (post.scheduledAt || null) : (existing.scheduledAt || null),
+              post.archivedAt !== undefined ? (post.archivedAt ?? null) : (existing.archivedAt ?? null),
+              revisionCount,
+              post.dueDate !== undefined ? (post.dueDate || null) : (existing.dueDate || null),
+              post.sortOrder ?? existing.sortOrder ?? null,
               post.id, 
               tenantId
             );
+          }
 
           // Emit activity and client notification when moved to Ready for Client
           if (existing.internalStatus !== "Ready for Client" && internalStatus === "Ready for Client") {
@@ -1921,7 +2592,10 @@ async function startServer() {
           }
         })();
         broadcastPostUpdated(tenantId, post.id);
-        const updated = getPosts(tenantId).find((p: any) => p.id === post.id);
+        const actorForAck = (socket as any).actor as SocketActor | undefined;
+        const updated = (actorForAck && actorIsClientLike(actorForAck))
+          ? getPostStripForShare(tenantId, post.id)
+          : getPostById(tenantId, post.id);
         if (ack && updated) ack(updated);
       } catch (err) {
         console.error("[CRITICAL] Update Post Failed:", err);
@@ -1950,10 +2624,13 @@ async function startServer() {
         for (const tkn of shareTokens) {
           io.to(`share:${tkn}`).emit("post-deleted", postId);
         }
+        emitToShareSetRooms(io, postId, "post-deleted", postId);
         db.prepare("DELETE FROM posts WHERE id = ? AND tenantId = ?").run(postId, tenantId);
         db.prepare("DELETE FROM comments WHERE postId = ?").run(postId);
         db.prepare("DELETE FROM tasks WHERE postId = ?").run(postId);
         io.to(tenantId).emit("post-deleted", postId);
+        io.to(`${tenantId}:internal`).emit("post-deleted", postId);
+        io.to(`${tenantId}:client`).emit("post-deleted", postId);
       } catch (err) {
         console.error("[CRITICAL] Delete Post Failed:", err);
         socket.emit("error", "Database error: Failed to delete post.");
@@ -1963,10 +2640,17 @@ async function startServer() {
     socket.on("add-comment", (data: { tenantId: string; postId: string; comment: any }) => {
       const { tenantId, postId, comment } = data;
       try {
+        const owned = db.prepare("SELECT id FROM posts WHERE id = ? AND tenantId = ?").get(postId, tenantId);
+        if (!owned) {
+          socket.emit("error", "Post not found in this workspace.");
+          return;
+        }
         const id = comment.id || randomUUID();
+        const actor = (socket as any).actor as SocketActor | undefined;
+        const clientLike = !!(actor && actorIsClientLike(actor));
         db.prepare("INSERT INTO comments (id, postId, author, text, timestamp, isInternalOnly, changeType, priority, slideIndex) VALUES (?,?,?,?,?,?,?,?,?)")
           .run(id, postId, comment.author, comment.text, comment.timestamp || new Date().toISOString(),
-            comment.isInternalOnly ? 1 : 0, comment.changeType || null, comment.priority || null, comment.slideIndex ?? null);
+            clientLike ? 0 : (comment.isInternalOnly ? 1 : 0), comment.changeType || null, comment.priority || null, comment.slideIndex ?? null);
         const post = db.prepare("SELECT title FROM posts WHERE id = ?").get(postId) as any;
         logActivity(tenantId, "comment-added", post?.title || postId, `${comment.author} ${comment.isInternalOnly ? "(internal)" : "(client)"}: ${comment.text.substring(0, 60)}`);
         io.to(tenantId).emit("activity", { action: "comment-added", subject: post?.title, detail: comment.text.substring(0, 60), tenantId, timestamp: new Date().toISOString() });
@@ -1980,6 +2664,11 @@ async function startServer() {
     socket.on("delete-comment", (data: { tenantId: string; postId: string; commentId: string }) => {
       const { tenantId, postId, commentId } = data;
       try {
+        const owned = db.prepare("SELECT c.id FROM comments c JOIN posts p ON p.id = c.postId WHERE c.id = ? AND p.tenantId = ? AND p.id = ?").get(commentId, tenantId, postId);
+        if (!owned) {
+          socket.emit("error", "Comment not found in this workspace.");
+          return;
+        }
         db.prepare("DELETE FROM comments WHERE id = ?").run(commentId);
         broadcastPostUpdated(tenantId, postId);
       } catch (err) {
@@ -1990,20 +2679,38 @@ async function startServer() {
 
     socket.on("add-task", (data: { tenantId: string; postId: string; task: { text: string; completed?: boolean } }) => {
       const { tenantId, postId, task } = data;
+      if (!postOwnedByTenant(postId, tenantId)) {
+        socket.emit("error", "Post not found in this workspace.");
+        return;
+      }
       const id = randomUUID();
       db.prepare("INSERT INTO tasks (id, postId, text, completed) VALUES (?,?,?,?)")
         .run(id, postId, task.text, task.completed ? 1 : 0);
-      io.to(tenantId).emit("post-updated", getPosts(tenantId).find((p) => p.id === postId));
+      broadcastPostUpdated(tenantId, postId);
     });
 
     socket.on("delete-task", (data: { tenantId: string; postId: string; taskId: string }) => {
       const { tenantId, postId, taskId } = data;
+      const owned = db.prepare(`
+        SELECT t.id FROM tasks t JOIN posts p ON p.id = t.postId WHERE t.id = ? AND p.tenantId = ?
+      `).get(taskId, tenantId);
+      if (!owned) {
+        socket.emit("error", "Task not found in this workspace.");
+        return;
+      }
       db.prepare("DELETE FROM tasks WHERE id = ?").run(taskId);
       broadcastPostUpdated(tenantId, postId);
     });
 
     socket.on("toggle-task", (data: { tenantId: string; postId: string; taskId: string; completed: boolean }) => {
       const { tenantId, postId, taskId, completed } = data;
+      const owned = db.prepare(`
+        SELECT t.id FROM tasks t JOIN posts p ON p.id = t.postId WHERE t.id = ? AND p.tenantId = ?
+      `).get(taskId, tenantId);
+      if (!owned) {
+        socket.emit("error", "Task not found in this workspace.");
+        return;
+      }
       db.prepare("UPDATE tasks SET completed = ? WHERE id = ?").run(completed ? 1 : 0, taskId);
       broadcastPostUpdated(tenantId, postId);
     });
@@ -2015,16 +2722,18 @@ async function startServer() {
         return;
       }
       const tenant = data.tenant;
+      tenant.name = String(tenant.name || "").trim();
       try {
-        const exists = db.prepare("SELECT id FROM tenants WHERE id = ?").get(tenant.id);
-        if (exists) {
+        const existing = db.prepare("SELECT id, settings FROM tenants WHERE id = ?").get(tenant.id) as { id: string; settings: any } | undefined;
+        const settings = mergeTenantProfileSettings(existing?.settings, tenant.settings, !existing);
+        if (existing) {
           db.prepare("UPDATE tenants SET name=?, logoUrl=?, bio=?, settings=? WHERE id=?")
-            .run(tenant.name, tenant.logoUrl, tenant.bio || "", JSON.stringify(tenant.settings || {}), tenant.id);
+            .run(tenant.name, tenant.logoUrl, tenant.bio || "", JSON.stringify(settings), tenant.id);
         } else {
           db.prepare("INSERT INTO tenants (id, name, logoUrl, bio, settings) VALUES (?, ?, ?, ?, ?)")
-            .run(tenant.id, tenant.name, tenant.logoUrl, tenant.bio || "", JSON.stringify(tenant.settings || {}));
+            .run(tenant.id, tenant.name, tenant.logoUrl, tenant.bio || "", JSON.stringify(settings));
         }
-        io.emit("tenant-updated", { ...tenant, settings: tenant.settings || {} });
+        io.emit("tenant-updated", tenantPublic({ ...tenant, settings }));
         callback?.({ success: true });
       } catch (err: any) {
         console.error(`[ERROR] upsert-tenant failed: ${err.message}`);
@@ -2033,8 +2742,12 @@ async function startServer() {
     });
 
     // ── Campaign CRUD ─────────────────────────────────────
-    socket.on("create-campaign", (data: { tenantId: string; campaign: any; adminToken: string }) => {
-      if (!getSession(data.adminToken)) return;
+    socket.on("create-campaign", (data: { tenantId: string; campaign: any; adminToken: string }, callback?: (result: { success: boolean; campaign?: any; error?: string }) => void) => {
+      const s = getSession(data.adminToken);
+      if (!s || s.role === "user") {
+        callback?.({ success: false, error: "You are not permitted to manage campaigns." });
+        return;
+      }
       const { tenantId, campaign } = data;
       const id = randomUUID();
       db.prepare("INSERT INTO campaigns (id, tenantId, name, code, color, startDate, endDate, description, createdAt) VALUES (?,?,?,?,?,?,?,?,?)")
@@ -2042,10 +2755,12 @@ async function startServer() {
           campaign.startDate, campaign.endDate, campaign.description || "", new Date().toISOString());
       const created = db.prepare("SELECT * FROM campaigns WHERE id = ?").get(id);
       io.emit("campaign-updated", { action: "created", campaign: created, tenantId });
+      callback?.({ success: true, campaign: created });
     });
 
     socket.on("update-campaign", (data: { tenantId: string; campaign: any; adminToken: string }) => {
-      if (!getSession(data.adminToken)) return;
+      const s = getSession(data.adminToken);
+      if (!s || s.role === "user") return;
       const { campaign } = data;
       db.prepare("UPDATE campaigns SET name=?, code=?, color=?, startDate=?, endDate=?, description=? WHERE id=?")
         .run(campaign.name, campaign.code, campaign.color, campaign.startDate, campaign.endDate, campaign.description, campaign.id);
@@ -2053,14 +2768,16 @@ async function startServer() {
     });
 
     socket.on("delete-campaign", (data: { tenantId: string; campaignId: string; adminToken: string }) => {
-      if (!getSession(data.adminToken)) return;
+      const s = getSession(data.adminToken);
+      if (!s || s.role === "user") return;
       db.prepare("DELETE FROM campaigns WHERE id = ? AND tenantId = ?").run(data.campaignId, data.tenantId);
       io.emit("campaign-updated", { action: "deleted", campaignId: data.campaignId, tenantId: data.tenantId });
     });
 
     // ── Content Pillar CRUD ───────────────────────────────
     socket.on("create-pillar", (data: { tenantId: string; pillar: any; adminToken: string }) => {
-      if (!getSession(data.adminToken)) return;
+      const s = getSession(data.adminToken);
+      if (!s || s.role === "user") return;
       const id = randomUUID();
       db.prepare("INSERT INTO content_pillars (id, tenantId, name, color) VALUES (?,?,?,?)")
         .run(id, data.tenantId, data.pillar.name, data.pillar.color || "#6366f1");
@@ -2069,7 +2786,8 @@ async function startServer() {
     });
 
     socket.on("delete-pillar", (data: { tenantId: string; pillarId: string; adminToken: string }) => {
-      if (!getSession(data.adminToken)) return;
+      const s = getSession(data.adminToken);
+      if (!s || s.role === "user") return;
       db.prepare("DELETE FROM content_pillars WHERE id = ? AND tenantId = ?").run(data.pillarId, data.tenantId);
       io.emit("pillar-updated", { action: "deleted", pillarId: data.pillarId, tenantId: data.tenantId });
     });
@@ -2077,13 +2795,27 @@ async function startServer() {
     socket.on("disconnect", () => console.log("Client disconnected:", socket.id));
   });
 
+  // ── MCP (Streamable HTTP, before SPA catch-all) ───────────
+  mountReviewRoomMcp(app, {
+    db,
+    getPosts,
+    getPostById,
+    tenantPublic,
+    deriveClientStatus,
+    nextSortOrder,
+    logActivity,
+    broadcastPostUpdated,
+    broadcastPostCreated,
+  });
+
   // ── Vite dev or prod static ──────────────────────────────
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({ server: { middlewareMode: true }, appType: "spa" });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static("dist"));
-    app.get(/^(?!\/api|\/uploads).*/, (_req, res) => {
+    mountProductionStaticAssets(app);
+    app.get(/^(?!\/api|\/uploads|\/mcp).*/, (_req, res) => {
+      res.setHeader("Cache-Control", "no-cache");
       res.sendFile(path.join(process.cwd(), "dist", "index.html"));
     });
   }

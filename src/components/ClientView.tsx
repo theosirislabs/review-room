@@ -4,11 +4,12 @@ import { motion, AnimatePresence } from "motion/react";
 import {
   ChevronLeft, ChevronRight, Copy, Grid3X3,
   Play, Send, X, CalendarDays, Clock, CheckCheck,
-  AlertCircle, Loader2, ImageOff, MessageSquare, Share2, FileText,
-  Sun, Moon
+  AlertCircle, Loader2, ImageOff, MessageSquare, Share2, FileText
 } from "lucide-react";
 import { useToast } from "./Toast";
 import { createAndCopyClientPostShare } from "../clientPostShare";
+import { useClientTheme } from "../clientTheme";
+import { ClientThemeToggle } from "./ClientThemeToggle";
 
 interface Props {
   posts: Post[];
@@ -16,29 +17,31 @@ interface Props {
   brandName?: string;
   logoUrl?: string;
   bio?: string;
+  reviewerName?: string;
   /** When true (single-post magic link), show the post even if client status is "Not Ready for Client". */
   singlePostShareMode?: boolean;
   /** When true, this is a share-set (multi-post review) view. */
   shareSetMode?: boolean;
   /** Agency / internal staff: show control to copy a single-post review link from the client UI. */
   postShareLinkEligible?: boolean;
+  previewMode?: boolean;
   adminToken?: string;
   onUpdatePost: (post: Post) => void;
   onAddComment: (postId: string, comment: any) => void;
+  // Preserved for compatibility with the existing client route contract.
   onDeleteComment: (postId: string, commentId: string) => void;
 }
 
-import { isVideo, fallbackSvg, parseDateSafe, isPostVisibleToClient, shouldRenderAsVideo } from "../utils";
+import { fallbackSvg, parseDateSafe, isPostVisibleToClient, shouldRenderAsVideo, tileAspectClass } from "../utils";
 import OsirisLogo from "./OsirisLogo";
-import { useTheme } from "../theme";
 
 function PostStatusBadge({ status }: { status: Post["clientStatus"] }) {
   const cfg = {
     "Not Ready for Client": "bg-zinc-500/15 text-zinc-300 border-zinc-500/25",
     "Ready to Schedule": "bg-purple-500/15 text-purple-300 border-purple-500/25",
     "Approved": "bg-emerald-500/15 text-emerald-300 border-emerald-500/25",
-    "Changes Requested": "bg-amber-500/15 text-amber-300 border-amber-500/25",
-    "Needs Your Review": "bg-white/10 text-white/70 border-white/15",
+    "Changes Requested": "bg-red-500/20 text-red-300 border-red-400/30",
+    "Needs Your Review": "bg-indigo-500/25 text-indigo-200 border-indigo-400/40",
   }[status];
   return (
     <span className={`text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full border ${cfg}`}>
@@ -69,20 +72,20 @@ function MediaViewer({ urls, format, thumbnailUrl: _thumbnailUrl }: { urls: stri
   };
 
   if (!url) return (
-    <div className="w-full flex items-center justify-center bg-zinc-900 py-24">
+    <div className="rr-media-surface w-full flex items-center justify-center py-24">
       <p className="text-zinc-600 text-sm">No media</p>
     </div>
   );
 
   return (
     <div
-      className="relative select-none flex items-center justify-center overflow-hidden"
+      className={`relative select-none flex items-center justify-center overflow-hidden ${format === "story" ? "aspect-[9/16] max-h-[70vh] mx-auto w-auto" : ""}`}
       onTouchStart={onTouchStart}
       onTouchEnd={onTouchEnd}
     >
       {/* Global skeleton for viewer */}
       {!loaded && (
-        <div className="absolute inset-0 flex items-center justify-center bg-zinc-900/50">
+        <div className="rr-media-skeleton absolute inset-0 flex items-center justify-center">
           <Loader2 className="w-8 h-8 text-zinc-600 animate-spin" />
         </div>
       )}
@@ -108,19 +111,19 @@ function MediaViewer({ urls, format, thumbnailUrl: _thumbnailUrl }: { urls: stri
       )}
 
       {idx > 0 && (
-        <button onClick={prev} className="absolute left-2 top-1/2 -translate-y-1/2 w-8 h-8 bg-black/50 hover:bg-black/80 backdrop-blur-sm rounded-full flex items-center justify-center text-white transition-colors">
+         <button type="button" onClick={prev} aria-label="Previous media slide" className="absolute left-2 top-1/2 -translate-y-1/2 w-10 h-10 bg-black/50 hover:bg-black/80 backdrop-blur-sm rounded-full flex items-center justify-center text-white transition-colors">
           <ChevronLeft className="w-5 h-5" />
         </button>
       )}
       {idx < urls.length - 1 && (
-        <button onClick={next} className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 bg-black/50 hover:bg-black/80 backdrop-blur-sm rounded-full flex items-center justify-center text-white transition-colors">
+         <button type="button" onClick={next} aria-label="Next media slide" className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 bg-black/50 hover:bg-black/80 backdrop-blur-sm rounded-full flex items-center justify-center text-white transition-colors">
           <ChevronRight className="w-5 h-5" />
         </button>
       )}
       {urls.length > 1 && (
         <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1.5">
           {urls.map((_, i) => (
-            <button key={i} onClick={() => setIdx(i)} className={`w-1.5 h-1.5 rounded-full transition-all ${i === idx ? "bg-white scale-125" : "bg-white/40"}`} />
+             <button key={i} type="button" onClick={() => setIdx(i)} aria-label={`Go to media slide ${i + 1}`} className={`w-5 h-5 rounded-full transition-all ${i === idx ? "bg-white scale-125" : "bg-white/40"}`} />
           ))}
         </div>
       )}
@@ -144,7 +147,7 @@ function GridTile({ post, index, onClick, isSelected, isSelectMode, onToggleSele
   const approved = post.clientStatus === "Approved";
   const changes = post.clientStatus === "Changes Requested";
 
-  const handleTileClick = (e: React.MouseEvent) => {
+  const handleTileClick = () => {
     if (isSelectMode) {
       onToggleSelect();
     } else {
@@ -157,9 +160,10 @@ function GridTile({ post, index, onClick, isSelected, isSelectMode, onToggleSele
       onClick={handleTileClick}
       initial={{ opacity: 0, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1 }}
-      transition={{ delay: index * 0.04, duration: 0.3 }}
-      className={`relative block w-full aspect-[4/5] group bg-zinc-200 overflow-hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 rounded-2xl border-2 transition-all ${isSelected ? "border-indigo-500 scale-[0.98] ring-4 ring-indigo-500/20" : "border-transparent"}`}
-      aria-label={`View post: ${post.title}`}
+      transition={{ delay: Math.min(index, 12) * 0.04, duration: 0.3 }}
+      className={`relative block w-full ${tileAspectClass(post.format)} group bg-zinc-200 overflow-hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 rounded-2xl border-2 transition-all ${isSelected ? "border-indigo-500 scale-[0.98] ring-4 ring-indigo-500/20" : "border-transparent"}`}
+       aria-label={`${isSelectMode ? "Select" : "View"} post: ${post.title}`}
+       aria-pressed={isSelectMode ? isSelected : undefined}
     >
       {/* Selection Checkbox */}
       {isSelectMode && (
@@ -181,10 +185,10 @@ function GridTile({ post, index, onClick, isSelected, isSelectMode, onToggleSele
                 src={post.mediaUrls[0]} 
                 onMouseEnter={(e) => e.currentTarget.play()}
                 onMouseLeave={(e) => { e.currentTarget.pause(); e.currentTarget.currentTime = 0; }}
-                onLoadedData={() => setLoaded(true)} 
-                onError={(e) => { (e.currentTarget.nextElementSibling as HTMLElement)?.classList.remove("hidden"); e.currentTarget.classList.add("hidden"); setLoaded(true); }} 
-                muted loop playsInline 
-                className={`w-full h-full object-cover transition-all duration-500 group-hover:scale-105 ${loaded ? "opacity-100" : "opacity-0"}`} 
+                onLoadedData={() => setLoaded(true)}
+                onError={(e) => { (e.currentTarget.nextElementSibling as HTMLElement)?.classList.remove("hidden"); e.currentTarget.classList.add("hidden"); setLoaded(true); }}
+                muted loop playsInline preload="none"
+                className={`w-full h-full object-cover transition-all duration-500 group-hover:scale-105 ${loaded ? "opacity-100" : "opacity-0"}`}
               />
             )}
             <img src={fallbackSvg} className="hidden w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" alt="Fallback" />
@@ -211,7 +215,7 @@ function GridTile({ post, index, onClick, isSelected, isSelectMode, onToggleSele
       {/* Format badge */}
       {post.format !== "image" && (
         <div className="absolute top-2 right-2 text-white drop-shadow-lg">
-          {post.format === "carousel" ? <Copy className="w-4 h-4" /> : <Play className="w-4 h-4 fill-white" />}
+          {post.format === "carousel" ? <Copy className="w-4 h-4" /> : post.format === "story" ? <span className="text-[10px] font-black">9:16</span> : <Play className="w-4 h-4 fill-white" />}
         </div>
       )}
 
@@ -226,6 +230,9 @@ function GridTile({ post, index, onClick, isSelected, isSelectMode, onToggleSele
       {!isSelectMode && (
         <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-3">
           <p className="text-white text-xs font-semibold truncate mb-1.5">{post.title}</p>
+          {post.campaignCode && (
+            <p className="text-[10px] font-bold uppercase tracking-wider text-white/80 mb-1 truncate">{post.campaignCode}</p>
+          )}
           <PostStatusBadge status={post.clientStatus} />
         </div>
       )}
@@ -252,7 +259,7 @@ function ScheduleRow({ post, onClick }: ScheduleRowProps) {
       className="w-full flex items-center gap-3 sm:gap-4 p-3 sm:p-4 bg-white border border-zinc-100 rounded-2xl hover:border-zinc-300 transition-colors text-left group focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
     >
       {/* Thumbnail */}
-      <div className="w-14 h-[70px] sm:w-16 sm:h-20 shrink-0 rounded-xl overflow-hidden bg-zinc-200 relative">
+      <div className={`shrink-0 rounded-xl overflow-hidden bg-zinc-200 relative w-14 sm:w-16 ${post.format === "story" ? "h-24 sm:h-28" : "h-[70px] sm:h-20"}`}>
         {!loaded && <div className="absolute inset-0 skeleton animate-pulse z-10" />}
         {post.thumbnailUrl || post.mediaUrls[0] ? (
           post.thumbnailUrl ? (
@@ -300,8 +307,7 @@ function ScheduleRow({ post, onClick }: ScheduleRowProps) {
 }
 
 /* ── Main component ───────────────────────────────────────── */
-export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, singlePostShareMode = false, shareSetMode = false, postShareLinkEligible = false, adminToken = "", onUpdatePost, onAddComment, onDeleteComment }: Props) {
-  const { theme, toggleTheme } = useTheme();
+export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, reviewerName = "", singlePostShareMode = false, shareSetMode = false, postShareLinkEligible = false, previewMode = false, adminToken = "", onUpdatePost, onAddComment, onDeleteComment: _onDeleteComment }: Props) {
   const visiblePosts = useMemo(
     () => (singlePostShareMode || shareSetMode ? posts : posts.filter((p) => isPostVisibleToClient(p.clientStatus))),
     [posts, singlePostShareMode, shareSetMode]
@@ -311,8 +317,10 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
   const [activePostId, setActivePostId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isSelectMode, setIsSelectMode] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(24);
   const [commentText, setCommentText] = useState("");
   const { success, error: toastError } = useToast();
+  const { theme: clientTheme, toggleTheme: toggleClientTheme } = useClientTheme(tenantId);
 
   const toggleSelect = (id: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
@@ -325,6 +333,7 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
   };
 
   const handleBulkApprove = () => {
+    if (previewMode) return;
     selectedIds.forEach(id => {
       const post = visiblePosts.find(p => p.id === id);
       if (post && post.clientStatus !== "Approved") {
@@ -338,28 +347,11 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
   const [sendingComment, setSendingComment] = useState(false);
   const [summaryOpen, setSummaryOpen] = useState(false);
 
-  // On mount, check all posts: if post has client comments and isn't approved, mark as Changes Requested
-  useEffect(() => {
-    let changed = false;
-    const updated = posts.map(p => {
-      const hasFeedback = p.clientComments && p.clientComments.some(c => !c.isInternalOnly);
-      if (hasFeedback && p.clientStatus !== "Changes Requested" && p.clientStatus !== "Approved") {
-        changed = true;
-        return { ...p, clientStatus: "Changes Requested", internalStatus: "Changes Requested" };
-      }
-      return p;
-    });
-    if (changed) {
-      // Update each post that needs it
-      updated.forEach((p, i) => {
-        if (p.clientStatus === "Changes Requested" && posts[i]?.clientStatus !== "Changes Requested") {
-          onUpdatePost(p);
-        }
-      });
-    }
-  }, []);
   const commentRef = useRef<HTMLInputElement>(null);
   const summaryRef = useRef<HTMLDivElement>(null);
+  const viewerDialogRef = useRef<HTMLDivElement>(null);
+  const desktopViewerCloseRef = useRef<HTMLButtonElement>(null);
+  const mobileViewerCloseRef = useRef<HTMLButtonElement>(null);
   const modalTouchX = useRef<number | null>(null);
 
   const [requestModalOpen, setRequestModalOpen] = useState(false);
@@ -368,11 +360,25 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
   const [reqSlideIndex, setReqSlideIndex] = useState<number | "">("");
   const [reqText, setReqText] = useState("");
 
+  const closeViewer = () => {
+    setRequestModalOpen(false);
+    setActivePostId(null);
+  };
+
   const sortedPosts = useMemo(() => {
     return [...visiblePosts].sort((a, b) => parseDateSafe(b.date, b.time) - parseDateSafe(a.date, a.time));
   }, [visiblePosts]);
 
+  useEffect(() => { setVisibleCount(24); }, [visiblePosts.length, activeTab]);
+  const pagedPosts = sortedPosts.slice(0, visibleCount);
+  const schedulePosts = useMemo(
+    () => [...sortedPosts].sort((a, b) => parseDateSafe(a.date, a.time) - parseDateSafe(b.date, b.time)),
+    [sortedPosts],
+  );
+  const pagedSchedulePosts = schedulePosts.slice(0, visibleCount);
+
   const activePost = useMemo(() => activePostId ? sortedPosts.find((p: any) => p.id === activePostId) ?? null : null, [activePostId, sortedPosts]);
+  const viewerOpen = activePost !== null;
   const activePostIdx = activePost ? sortedPosts.findIndex((p: any) => p.id === activePost.id) : -1;
   const clientComments = activePost?.clientComments.filter((c: any) => !c.isInternalOnly) ?? [];
 
@@ -385,15 +391,16 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
   const displayName = brandName || tenantId.charAt(0).toUpperCase() + tenantId.slice(1);
 
   const copySinglePostClientLink = useCallback(async () => {
-    if (!activePost) return;
+    if (previewMode || !activePost) return;
     const r = await createAndCopyClientPostShare({
-      tenantId,
-      postId: activePost.id,
-      adminToken: adminToken || undefined,
-    });
+       tenantId,
+       postId: activePost.id,
+       adminToken: adminToken || undefined,
+       reviewerName: reviewerName || undefined,
+     });
     if (r.ok) success("Single-post client link copied — send this URL to your client.");
     else toastError(r.error);
-  }, [activePost, tenantId, adminToken, success, toastError]);
+  }, [activePost, tenantId, adminToken, reviewerName, previewMode, success, toastError]);
 
   useEffect(() => {
     setSelectedIds((prev) => {
@@ -418,6 +425,55 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
+  // Keep an opened viewer modal isolated from the page underneath and return
+  // keyboard users to the post tile that opened it.
+  useEffect(() => {
+    if (!viewerOpen) return;
+
+    const previousActiveElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const isDesktop = typeof window.matchMedia === "function" && window.matchMedia("(min-width: 640px)").matches;
+    (isDesktop ? desktopViewerCloseRef : mobileViewerCloseRef).current?.focus();
+
+    const trapFocus = (event: KeyboardEvent) => {
+      if (event.key !== "Tab") return;
+      const dialog = viewerDialogRef.current;
+      if (!dialog) return;
+
+      const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(
+        "a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])",
+      )).filter((element) => {
+        const style = window.getComputedStyle(element);
+        return style.display !== "none" && style.visibility !== "hidden";
+      });
+      if (focusable.length === 0) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+      }
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const current = document.activeElement;
+      if (event.shiftKey && (current === first || !dialog.contains(current))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (current === last || !dialog.contains(current))) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", trapFocus);
+
+    return () => {
+      document.removeEventListener("keydown", trapFocus);
+      document.body.style.overflow = previousOverflow;
+      previousActiveElement?.focus();
+    };
+  }, [viewerOpen]);
+
   // Keyboard nav
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -428,17 +484,23 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
         if (e.key === "ArrowLeft" && activePostIdx > 0) setActivePostId(sortedPosts[activePostIdx - 1].id);
         if (e.key === "ArrowRight" && activePostIdx < sortedPosts.length - 1) setActivePostId(sortedPosts[activePostIdx + 1].id);
       }
-      if (e.key === "Escape") setActivePostId(null);
+      if (e.key === "Escape") {
+        if (requestModalOpen) {
+          setRequestModalOpen(false);
+          return;
+        }
+        closeViewer();
+      }
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [activePostId, activePostIdx, sortedPosts]);
+  }, [activePostId, activePostIdx, sortedPosts, requestModalOpen]);
 
   const submitComment = async () => {
-    if (!activePost || !commentText.trim()) return;
+    if (previewMode || !activePost || !commentText.trim()) return;
     setSendingComment(true);
     onAddComment(activePost.id, {
-      author: "Client",
+      author: reviewerName || "Client",
       text: commentText.trim(),
       isInternalOnly: false,
       timestamp: new Date().toISOString(),
@@ -452,41 +514,29 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
   };
 
   const handleApprove = () => {
-    if (!activePost) return;
+    if (previewMode || !activePost) return;
     const wasAlready = activePost.clientStatus === "Approved";
     onUpdatePost({ ...activePost, clientStatus: "Approved", internalStatus: "Approved" });
     if (!wasAlready) success("Post approved ✓");
   };
 
-  const handleDisapprove = () => {
-    if (!activePost) return;
-    onUpdatePost({ ...activePost, clientStatus: "Changes Requested", internalStatus: "Changes Requested" });
-    onAddComment(activePost.id, {
-      author: "Client",
-      text: "Disapproved — needs revision",
-      isInternalOnly: false,
-      timestamp: new Date().toISOString(),
-      changeType: "Other",
-      priority: "high",
-    });
-    success("Post disapproved — agency notified");
-  };
   const handleRevertApproval = () => {
-    if (!activePost) return;
+    if (previewMode || !activePost) return;
     onUpdatePost({ ...activePost, clientStatus: "Needs Your Review", internalStatus: "Ready for Client" });
     success("Status reverted to Needs Your Review");
   };
   const handleRequestChanges = () => {
+    if (previewMode) return;
     setRequestModalOpen(true);
   };
 
   const submitRevisionRequest = () => {
-    if (!activePost || !reqText.trim()) return;
+    if (previewMode || !activePost || !reqText.trim()) return;
     setSendingComment(true);
 
     // Create structured comment
     onAddComment(activePost.id, {
-      author: "Client",
+      author: reviewerName || "Client",
       text: reqText.trim(),
       isInternalOnly: false,
       timestamp: new Date().toISOString(),
@@ -528,10 +578,20 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
 
   // ── Render ─────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-zinc-50 font-sans text-zinc-900 antialiased">
+    <div
+      data-testid="client-review-room"
+      data-client-theme={clientTheme}
+      data-preview-mode={previewMode ? "true" : undefined}
+      className="rr-client min-h-screen bg-zinc-50 font-sans text-zinc-900 antialiased"
+    >
 
       {/* ── Header ─────────────────────────────────────────── */}
       <header className="sticky top-0 z-40 bg-white/80 backdrop-blur-lg border-b border-zinc-200 relative">
+        {previewMode && (
+          <div className="bg-indigo-600 text-white px-4 py-2 text-center text-[10px] font-black uppercase tracking-widest">
+             Client view preview · Client decisions are disabled
+          </div>
+        )}
         <div className="absolute top-0 left-0 right-0 h-[2px] bg-signature" />
         <div className="max-w-4xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-4">
           {/* Brand */}
@@ -539,42 +599,38 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
             {logoUrl ? (
               <img src={logoUrl} onError={(e) => { e.currentTarget.src = fallbackSvg; }} alt={`${displayName} logo`} className="w-7 h-7 rounded-full object-cover border border-zinc-200" />
             ) : (
-              <div className="w-7 h-7 rounded-full bg-zinc-900 text-white flex items-center justify-center text-[10px] font-bold uppercase shrink-0">
+              <div className="rr-client-brand-mark w-7 h-7 rounded-full text-white flex items-center justify-center text-[10px] font-bold uppercase shrink-0">
                 {displayName.charAt(0)}
               </div>
             )}
             <span className="font-semibold text-sm text-zinc-900 truncate max-w-[120px] sm:max-w-none">{displayName}</span>
             <span className="hidden sm:block text-zinc-300">·</span>
-            <span className="hidden sm:block text-zinc-500 text-sm">{shareSetMode ? "Shared Set" : singlePostShareMode ? "Shared post" : "Review Package"}</span>
+            <span className="hidden sm:block text-zinc-500 text-sm">{shareSetMode ? "Shared Set" : singlePostShareMode ? "Shared post" : "Client review"}</span>
           </div>
 
-          {/* Progress / summary */}
-          <div ref={summaryRef} className="relative flex-shrink-0 flex items-center gap-2">
-            <button
-              onClick={toggleTheme}
-              className="p-2 rounded-full text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 transition-colors"
-              title={theme === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode"}
-            >
-              {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-            </button>
+          {/* Progress / summary + client-only appearance control */}
+          <div className="flex items-center gap-2 shrink-0">
+            <div ref={summaryRef} className="relative flex-shrink-0 flex items-center gap-2">
             <button
               onClick={() => setSummaryOpen((o) => !o)}
-              className="flex items-center gap-3 group"
-              aria-label="Review summary"
+               className="flex items-center gap-3 group"
+               aria-label="Review summary"
+               aria-expanded={summaryOpen}
+               aria-controls="client-review-summary"
             >
               <div className="hidden sm:flex flex-col items-end">
                 <span className="text-xs font-medium text-zinc-600 group-hover:text-zinc-900 transition-colors whitespace-nowrap">
                   {reviewed}/{visiblePosts.length} reviewed
                 </span>
-                <div className="w-24 h-1.5 bg-zinc-100 rounded-full mt-1 overflow-hidden">
+                <div className="rr-client-progress-track w-24 h-2 rounded-full mt-1 overflow-hidden">
                   <div className="h-full bg-signature rounded-full transition-all duration-700" style={{ width: `${progress}%` }} />
                 </div>
               </div>
               <div className="sm:hidden flex items-center gap-1.5">
-                <div className="w-16 h-1.5 bg-zinc-100 rounded-full overflow-hidden">
+                <div className="rr-client-progress-track w-16 h-2 rounded-full overflow-hidden">
                   <div className="h-full bg-signature rounded-full transition-all" style={{ width: `${progress}%` }} />
                 </div>
-                <span className="text-xs text-zinc-500">{progress}%</span>
+                <span className="text-xs font-medium text-zinc-600">{progress}%</span>
               </div>
             </button>
 
@@ -585,7 +641,8 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: 6, scale: 0.97 }}
                   transition={{ duration: 0.15 }}
-                  className="absolute right-0 mt-2 w-56 bg-white rounded-2xl shadow-xl border border-zinc-100 p-4 z-50"
+                   id="client-review-summary"
+                   className="absolute right-0 mt-2 w-56 bg-white rounded-2xl shadow-xl border border-zinc-100 p-4 z-50"
                 >
                   <h3 className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 mb-3">Review Summary</h3>
                   {[
@@ -599,11 +656,13 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
                     </div>
                   ))}
                   <div className="mt-3 pt-3 border-t border-zinc-100 text-center">
-                    <span className="text-xs font-semibold text-zinc-500">{progress}% complete</span>
+                     <span className="text-xs font-semibold text-zinc-500">{progress}% reviewed</span>
                   </div>
                 </motion.div>
               )}
             </AnimatePresence>
+            </div>
+            <ClientThemeToggle theme={clientTheme} onToggle={toggleClientTheme} />
           </div>
         </div>
       </header>
@@ -631,13 +690,7 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
 
             {/* Meta */}
             <div className="flex-1 text-center sm:text-left min-w-0">
-              <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-5 mb-4">
-                <h2 className="text-xl font-medium leading-tight">{tenantId}</h2>
-                <div className="flex justify-center sm:justify-start gap-2">
-                  <button className="px-5 py-1.5 bg-zinc-100 hover:bg-zinc-200 rounded-lg text-sm font-medium transition-colors">Following</button>
-                  <button className="px-5 py-1.5 bg-zinc-100 hover:bg-zinc-200 rounded-lg text-sm font-medium transition-colors">Message</button>
-                </div>
-              </div>
+              <h2 className="text-xl font-semibold leading-tight">{displayName}</h2>
 
               {/* Stats */}
               <div className="flex justify-center sm:justify-start gap-6 sm:gap-8 mb-4 text-sm">
@@ -648,9 +701,11 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
 
               {/* Bio */}
               <div className="text-sm text-zinc-700 max-w-sm mx-auto sm:mx-0">
-                <p className="font-semibold">{displayName}</p>
-                <p className="text-zinc-500 mt-0.5">{bio || "Content review portal · Powered by OSIRIS Review Room"}</p>
-                {needsReview > 0 && (
+                 <p className="text-zinc-500">{bio || "Content review portal · Powered by OSIRIS Review Room"}</p>
+                 {reviewerName && (
+                   <p className="mt-2 text-xs font-medium text-indigo-600">Review shared with {reviewerName}</p>
+                 )}
+                 {needsReview > 0 && (
                   <p className="mt-2 text-amber-600 font-medium text-xs flex items-center justify-center sm:justify-start gap-1.5">
                     <AlertCircle className="w-3.5 h-3.5" />
                     {needsReview} post{needsReview > 1 ? "s" : ""} waiting for your review
@@ -662,17 +717,19 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
         </div>
 
         {/* ── Tabs ────────────────────────────────────────── */}
-        <div className="flex border-t border-zinc-200 mb-0.5">
+        <div role="tablist" aria-label="Client review views" className="flex border-b border-zinc-200 mb-0.5">
           {[
-            { id: "grid" as const, label: "Posts", Icon: Grid3X3 },
+             { id: "grid" as const, label: "Content", Icon: Grid3X3 },
             { id: "schedule" as const, label: "Schedule", Icon: CalendarDays },
           ].map(({ id, label, Icon }) => (
             <button
               key={id}
-              onClick={() => setActiveTab(id)}
-              className={`flex-1 flex items-center justify-center gap-2 py-3 sm:py-4 text-xs font-bold tracking-widest uppercase transition-colors ${activeTab === id
-                ? "text-zinc-900 border-t-2 border-zinc-900 -mt-px"
-                : "text-zinc-400 hover:text-zinc-600"
+               onClick={() => setActiveTab(id)}
+               aria-selected={activeTab === id}
+               role="tab"
+               className={`flex-1 min-h-11 flex items-center justify-center gap-2 py-3 sm:py-4 text-xs font-bold tracking-widest uppercase transition-colors ${activeTab === id
+                ? "text-zinc-900 border-b-2 border-zinc-900 -mb-px"
+                : "text-zinc-500 hover:text-zinc-700"
                 }`}
             >
               <Icon className="w-4 h-4" />
@@ -682,16 +739,20 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
         </div>
 
         {/* Selection Toggle */}
-        {activeTab === "grid" && sortedPosts.length > 0 && (
-          <div className="px-4 py-3 border-b border-zinc-100 flex justify-end">
-             <button 
+        {activeTab === "grid" && sortedPosts.length > 0 && !previewMode && (
+          <div className="px-4 sm:px-0 py-3 border-b border-zinc-100 flex items-center">
+             <button
+                type="button"
                 onClick={() => {
                   setIsSelectMode(!isSelectMode);
                   if (isSelectMode) setSelectedIds(new Set());
                 }}
-                className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all border ${isSelectMode ? "bg-indigo-600 border-indigo-600 text-white shadow-lg shadow-indigo-200" : "bg-white border-zinc-200 text-zinc-500 hover:border-zinc-400"}`}
+                aria-label={isSelectMode ? "Cancel post selection" : "Select posts for approval"}
+                aria-pressed={isSelectMode}
+                title={isSelectMode ? "Cancel post selection" : "Choose posts for bulk approval"}
+                className={`rr-client-selection-toggle min-h-11 px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest transition-all border ${isSelectMode ? "bg-indigo-600 border-indigo-600 text-white shadow-lg shadow-indigo-200" : clientTheme === "dark" ? "rr-client-selection-toggle--idle" : "rr-client-selection-toggle--idle bg-white border-zinc-200 text-zinc-600 hover:border-zinc-400"}`}
               >
-                {isSelectMode ? "Cancel Selection" : "Select to Approve"}
+                {isSelectMode ? "Cancel Selection" : "Select Posts"}
               </button>
           </div>
         )}
@@ -699,7 +760,7 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
         {/* ── Grid ────────────────────────────────────────── */}
         {activeTab === "grid" && (
           <div className="grid grid-cols-3 gap-0.5 sm:gap-1">
-            {sortedPosts.map((post: any, i: number) => (
+            {pagedPosts.map((post: any, i: number) => (
               <GridTile 
                 key={post.id} 
                 post={post} 
@@ -719,15 +780,22 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
             )}
           </div>
         )}
+        {activeTab === "grid" && sortedPosts.length > pagedPosts.length && (
+          <div className="px-4 py-4">
+            <button type="button" onClick={() => setVisibleCount((n) => n + 24)} className="w-full py-2.5 text-xs font-black uppercase tracking-widest text-indigo-600 hover:bg-indigo-50 rounded-xl border border-indigo-100">
+              Show more ({sortedPosts.length - pagedPosts.length})
+            </button>
+          </div>
+        )}
 
         {/* Bulk Approve Bar */}
         <AnimatePresence>
-          {isSelectMode && selectedIds.size > 0 && (
+            {!previewMode && isSelectMode && selectedIds.size > 0 && (
             <motion.div 
               initial={{ y: 100, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
               exit={{ y: 100, opacity: 0 }}
-              className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] bg-zinc-900 text-white rounded-2xl shadow-2xl px-6 py-4 flex items-center gap-6 border border-white/10"
+              className="rr-client-action-bar fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] text-white rounded-2xl shadow-2xl px-6 py-4 flex items-center gap-6 border border-white/10"
             >
               <div className="flex items-center gap-3 pr-6 border-r border-white/10">
                 <div className="w-8 h-8 rounded-lg bg-indigo-500 text-white flex items-center justify-center font-bold text-xs">
@@ -737,11 +805,11 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
               </div>
               <button 
                 onClick={handleBulkApprove}
-                className="bg-white text-zinc-900 px-6 py-2.5 rounded-xl text-xs font-bold hover:bg-zinc-100 transition-all active:scale-95 shadow-lg flex items-center gap-2"
+                className="rr-client-contrast-action px-6 py-2.5 rounded-xl text-xs font-bold transition-all active:scale-95 shadow-lg flex items-center gap-2"
               >
                 <CheckCheck className="w-4 h-4" /> Approve All Selected
               </button>
-              <button onClick={() => { setIsSelectMode(false); setSelectedIds(new Set()); }} className="text-zinc-500 hover:text-white transition-colors">
+               <button type="button" onClick={() => { setIsSelectMode(false); setSelectedIds(new Set()); }} aria-label="Cancel post selection" className="text-zinc-500 hover:text-white transition-colors">
                 <X className="w-5 h-5" />
               </button>
             </motion.div>
@@ -751,15 +819,20 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
         {/* ── Schedule ────────────────────────────────────── */}
         {activeTab === "schedule" && (
           <div className="px-4 sm:px-0 pt-4 space-y-2">
-            {sortedPosts.length === 0 && (
-              <div className="text-center py-16 text-zinc-400">
-                <CalendarDays className="w-10 h-10 mx-auto mb-3 opacity-30" />
-                <p className="text-sm">No posts scheduled</p>
-              </div>
-            )}
-            {sortedPosts.map((post: any, realIdx: number) => {
-              return <ScheduleRow key={post.id} post={post} index={realIdx} onClick={() => setActivePostId(post.id)} />;
-            })}
+             {schedulePosts.length === 0 && (
+               <div className="text-center py-16 text-zinc-400">
+                 <CalendarDays className="w-10 h-10 mx-auto mb-3 opacity-30" />
+                 <p className="text-sm">No posts scheduled</p>
+               </div>
+             )}
+             {pagedSchedulePosts.map((post: any, realIdx: number) => {
+               return <ScheduleRow key={post.id} post={post} index={realIdx} onClick={() => setActivePostId(post.id)} />;
+             })}
+             {schedulePosts.length > pagedSchedulePosts.length && (
+               <button type="button" onClick={() => setVisibleCount((n) => n + 24)} className="w-full py-2.5 text-xs font-black uppercase tracking-widest text-indigo-600 hover:bg-indigo-50 rounded-xl border border-indigo-100">
+                 Show more ({schedulePosts.length - pagedSchedulePosts.length})
+               </button>
+             )}
           </div>
         )}
       </main>
@@ -773,13 +846,18 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
             className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 backdrop-blur-sm"
-            onClick={() => setActivePostId(null)}
+            onClick={closeViewer}
           >
             <motion.div
               initial={{ y: "100%", opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
               exit={{ y: "100%", opacity: 0 }}
               transition={{ type: "spring", damping: 30, stiffness: 280 }}
+              ref={viewerDialogRef}
+              role="dialog"
+              tabIndex={-1}
+              aria-modal="true"
+              aria-labelledby="client-post-viewer-title"
               className="
                 bg-white w-full
                 rounded-t-3xl sm:rounded-2xl
@@ -793,6 +871,7 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
               onTouchStart={onModalTouchStart}
               onTouchEnd={onModalTouchEnd}
             >
+              <h2 id="client-post-viewer-title" className="sr-only">Review post: {activePost.title}</h2>
               {/* Drag handle (mobile) */}
               <div className="sm:hidden flex justify-center pt-3 pb-1 shrink-0">
                 <div className="w-10 h-1 bg-zinc-200 rounded-full" />
@@ -811,10 +890,12 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
                   </button>
                 )}
                 <button
+                  ref={desktopViewerCloseRef}
                   type="button"
-                  onClick={() => setActivePostId(null)}
-                  className="w-8 h-8 bg-white/80 backdrop-blur-sm rounded-full flex items-center justify-center text-zinc-700 hover:text-zinc-900 hover:bg-white shadow-sm transition-colors"
-                  title="Close"
+                  onClick={closeViewer}
+                  aria-label="Close post viewer"
+                  className="w-10 h-10 bg-white/80 backdrop-blur-sm rounded-full flex items-center justify-center text-zinc-700 hover:text-zinc-900 hover:bg-white shadow-sm transition-colors"
+                  title="Close post viewer"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -822,23 +903,27 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
 
               <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
                 {/* ── Left: Media (true aspect ratio) ─────── */}
-                <div className="md:w-[55%] bg-zinc-900 flex flex-col relative self-stretch">
-                  <div className="flex-1 flex items-center justify-center bg-zinc-900">
-                    <MediaViewer urls={activePost.mediaUrls} format={activePost.format} thumbnailUrl={activePost.thumbnailUrl} />
+                <div className="rr-media-surface md:w-[55%] flex flex-col relative self-stretch">
+                  <div className="rr-media-surface flex-1 flex items-center justify-center">
+                     <MediaViewer key={activePost.id} urls={activePost.mediaUrls} format={activePost.format} thumbnailUrl={activePost.thumbnailUrl} />
                     </div>
 
                   {/* Post‑level prev/next (navigate between posts) */}
                   <div className="absolute bottom-3 left-3 flex gap-2">
-                    <button
-                      onClick={() => { if (activePostIdx > 0) setActivePostId(sortedPosts[activePostIdx - 1].id); }}
-                      disabled={activePostIdx <= 0}
+                     <button
+                       type="button"
+                       aria-label="Previous post"
+                       onClick={() => { if (activePostIdx > 0) setActivePostId(sortedPosts[activePostIdx - 1].id); }}
+                       disabled={activePostIdx <= 0}
                       className="w-7 h-7 bg-black/50 hover:bg-black/80 rounded-full flex items-center justify-center text-white disabled:opacity-0 transition-all text-xs font-bold"
                     >
                       ‹
                     </button>
-                    <button
-                      onClick={() => { if (activePostIdx < sortedPosts.length - 1) setActivePostId(sortedPosts[activePostIdx + 1].id); }}
-                      disabled={activePostIdx >= sortedPosts.length - 1}
+                     <button
+                       type="button"
+                       aria-label="Next post"
+                       onClick={() => { if (activePostIdx < sortedPosts.length - 1) setActivePostId(sortedPosts[activePostIdx + 1].id); }}
+                       disabled={activePostIdx >= sortedPosts.length - 1}
                       className="w-7 h-7 bg-black/50 hover:bg-black/80 rounded-full flex items-center justify-center text-white disabled:opacity-0 transition-all text-xs font-bold"
                     >
                       ›
@@ -862,12 +947,14 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
                         <OsirisLogo size={32} />
                       )}
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-sm leading-tight truncate">{tenantId}</p>
-                      <p className="text-xs text-zinc-400 truncate">
-                        {new Date(activePost.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} · {activePost.time} · {activePost.format}
-                      </p>
-                    </div>
+                     <div className="flex-1 min-w-0">
+                       <h3 className="font-semibold text-sm leading-tight truncate">{activePost.title}</h3>
+                       <p className="text-xs text-zinc-400 truncate">
+                         {displayName} · Post {activePostIdx + 1} of {sortedPosts.length} · {new Date(activePost.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} · {activePost.time}
+                         {activePost.campaignCode ? ` · ${activePost.campaignCode}` : ""}
+                         {activePost.dueDate ? ` · Due ${String(activePost.dueDate).slice(0, 10)}` : ""}
+                       </p>
+                     </div>
                     {postShareLinkEligible && (
                       <button
                         type="button"
@@ -878,41 +965,21 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
                         <Share2 className="w-5 h-5" />
                       </button>
                     )}
-                    <button type="button" onClick={() => setActivePostId(null)} className="sm:hidden text-zinc-400 hover:text-zinc-700 p-1 shrink-0" title="Close">
+                    <button
+                      ref={mobileViewerCloseRef}
+                      type="button"
+                      onClick={closeViewer}
+                      aria-label="Close post viewer"
+                      className="sm:hidden w-11 h-11 flex items-center justify-center text-zinc-500 hover:text-zinc-700 hover:bg-zinc-100 rounded-xl shrink-0"
+                      title="Close post viewer"
+                    >
                       <X className="w-5 h-5" />
                     </button>
                   </div>
 
-                  {/* Scrollable content */}
-                  <div className="flex-1 overflow-y-auto overscroll-contain">
-                    {/* Post navigation thumbnails */}
-                    <div className="p-4 border-b border-zinc-100 flex gap-2 overflow-x-auto">
-                      {sortedPosts.map((p: any) => (
-                        <button key={p.id} onClick={() => setActivePostId(p.id)} className={`shrink-0 aspect-[4/5] w-16 rounded-lg overflow-hidden relative border-2 ${p.id === activePostId ? "border-signature" : "border-transparent"} transition-colors`}>
-                          {p.thumbnailUrl ? (
-                            <img
-                              src={p.thumbnailUrl}
-                              onError={(e) => { e.currentTarget.src = fallbackSvg; }}
-                              alt=""
-                              className="w-full h-full object-cover"
-                            />
-                          ) : isVideo(p.mediaUrls[0]) || p.format === "reel" ? (
-                            <video src={p.mediaUrls[0]} className="w-full h-full object-cover" />
-                          ) : (
-                            <img
-                              src={p.mediaUrls[0]}
-                              onError={(e) => { e.currentTarget.src = fallbackSvg; }}
-                              alt=""
-                              className="w-full h-full object-cover"
-                              referrerPolicy="no-referrer"
-                            />
-                          )}
-                          {p.id === activePostId && <div className="absolute inset-0 bg-black/20" />}
-                        </button>
-                      ))}
-                    </div>
-
-                    {/* Caption */}
+                   {/* Scrollable content */}
+                   <div className="flex-1 overflow-y-auto overscroll-contain">
+                     {/* Caption */}
                     <div className="p-4 border-b border-zinc-100">
                       {activePost.script && activePost.script.length > 0 && (
                         <div className="mb-3 p-3 bg-indigo-50 border border-indigo-100 rounded-xl">
@@ -925,8 +992,7 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
                         </div>
                       )}
                       <p className="text-sm text-zinc-800 whitespace-pre-wrap leading-relaxed">
-                        <span className="font-semibold mr-2">{tenantId}</span>
-                        {activePost.caption}
+                         <span className="font-semibold mr-2">{displayName}</span> {activePost.caption}
                       </p>
                       {activePost.hashtags.length > 0 && (
                         <p className="mt-2 text-sm text-blue-600 flex flex-wrap gap-1">
@@ -946,7 +1012,7 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
                     {/* Client feedback thread */}
                     {clientComments.length > 0 && (
                       <div className="p-4 space-y-3 border-b border-zinc-100">
-                        <h4 className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Your Feedback</h4>
+                         <h4 className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Feedback</h4>
                         {clientComments.map((c: any) => (
                           <div key={c.id} className="flex gap-3 group">
                             <div className="w-7 h-7 rounded-full bg-zinc-200 shrink-0 flex items-center justify-center text-xs font-bold text-zinc-600">
@@ -981,85 +1047,85 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
                                 {new Date(c.timestamp).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                               </p>
                             </div>
-                            <button
-                              onClick={() => onDeleteComment(activePost.id, c.id)}
-                              className="opacity-0 group-hover:opacity-100 text-zinc-300 hover:text-red-500 transition-all self-start pt-1 shrink-0"
-                              aria-label="Delete comment"
-                            >
-                              <X className="w-3.5 h-3.5" />
-                            </button>
                           </div>
                         ))}
                       </div>
                     )}
                   </div>
 
-                  {/* ── Action footer ──────────────────────── */}
                   <div className="p-4 border-t border-zinc-100 bg-zinc-50/80 space-y-3 shrink-0">
-                    {/* Approve / Request Changes / Revert */}
-                    <div className="grid grid-cols-3 gap-2">
+                    {previewMode && (
+                      <div className="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-center text-xs font-semibold text-indigo-700">
+                        Preview mode · Client decisions are disabled
+                      </div>
+                    )}
+                    <div className="grid grid-cols-2 gap-2">
                       <button
+                        type="button"
                         onClick={handleApprove}
+                        disabled={previewMode || activePost.clientStatus === "Approved"}
+                        aria-label={activePost.clientStatus === "Approved" ? "Approved" : "Approve post"}
                         className={`py-2.5 rounded-xl text-sm font-semibold transition-all ${activePost.clientStatus === "Approved"
                           ? "bg-emerald-500 text-white shadow-sm shadow-emerald-200"
                           : "bg-white border border-zinc-200 text-zinc-700 hover:bg-emerald-50 hover:border-emerald-300 hover:text-emerald-700"
-                          }`}
+                          } ${previewMode ? "cursor-not-allowed opacity-60" : ""}`}
                       >
                         {activePost.clientStatus === "Approved" ? (
                           <span className="flex items-center justify-center gap-1.5"><CheckCheck className="w-4 h-4" /> Approved</span>
                         ) : "Approve"}
                       </button>
                       <button
-                        onClick={handleDisapprove}
-                        className="py-2.5 rounded-xl text-sm font-semibold transition-all bg-white border border-zinc-200 text-red-600 hover:bg-red-50 hover:border-red-300 hover:text-red-700"
-                      >
-                        Disapprove
-                      </button>
-                      <button
+                        type="button"
                         onClick={handleRequestChanges}
+                        disabled={previewMode}
+                        aria-label="Request changes"
                         className={`py-2.5 rounded-xl text-sm font-semibold transition-all ${activePost.clientStatus === "Changes Requested"
                           ? "bg-amber-400 text-white shadow-sm shadow-amber-200"
                           : "bg-white border border-zinc-200 text-zinc-700 hover:bg-amber-50 hover:border-amber-300 hover:text-amber-700"
-                          }`}
+                          } ${previewMode ? "cursor-not-allowed opacity-60" : ""}`}
                       >
-                        {activePost.clientStatus === "Changes Requested" ? "Changes Requested" : "Request Changes"}
+                        {activePost.clientStatus === "Changes Requested" ? "Changes requested" : "Request changes"}
                       </button>
                     </div>
                     {activePost.clientStatus === "Approved" && (
                       <button
+                        type="button"
                         onClick={handleRevertApproval}
-                        className="w-full py-2 rounded-xl text-xs font-semibold text-zinc-500 hover:text-zinc-700 hover:bg-zinc-100 border border-zinc-200 transition-all"
+                        disabled={previewMode}
+                        className="w-full py-2 rounded-xl text-xs font-semibold text-zinc-500 hover:text-zinc-700 hover:bg-zinc-100 border border-zinc-200 transition-all disabled:cursor-not-allowed disabled:opacity-60"
                       >
-                        Revert to Needs Review (approved by mistake)
+                        Undo approval
                       </button>
                     )}
-
-                    {/* Comment input */}
-                    <div className="flex items-center gap-2">
-                      <div className="flex-1 relative">
-                        <input
-                          ref={commentRef}
-                          type="text"
-                          value={commentText}
-                          onChange={(e) => setCommentText(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitComment(); } }}
-                          placeholder="Leave feedback…"
-                          className="w-full bg-white border border-zinc-200 rounded-full pl-4 pr-12 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900 focus:border-transparent transition-shadow"
-                        />
-                        <button
-                          onClick={submitComment}
-                          disabled={!commentText.trim() || sendingComment}
-                          className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center text-zinc-400 hover:text-zinc-900 disabled:opacity-30 transition-colors"
-                        >
-                          {sendingComment ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                        </button>
+                    {!previewMode && (
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 relative">
+                          <input
+                            ref={commentRef}
+                            type="text"
+                            value={commentText}
+                            onChange={(e) => setCommentText(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitComment(); } }}
+                            placeholder="Leave feedback…"
+                            className="w-full bg-white border border-zinc-200 rounded-full pl-4 pr-12 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900 focus:border-transparent transition-shadow"
+                          />
+                          <button
+                            type="button"
+                            onClick={submitComment}
+                            disabled={!commentText.trim() || sendingComment}
+                            aria-label="Send feedback"
+                            className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center text-zinc-400 hover:text-zinc-900 disabled:opacity-30 transition-colors"
+                          >
+                            {sendingComment ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                          </button>
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </div>
-                </div>
-              </div>
+                 </div>
+               </div>
 
-              {/* ── Structured Revision Modal (Overlay) ── */}
+               {/* ── Structured Revision Modal (Overlay) ── */}
               <AnimatePresence>
                 {requestModalOpen && activePost && (
                   <motion.div
@@ -1068,19 +1134,23 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, s
                     exit={{ opacity: 0 }}
                     className="absolute inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
                   >
-                    <motion.div
-                      initial={{ scale: 0.95, y: 10, opacity: 0 }}
+                     <motion.div
+                       role="dialog"
+                       aria-modal="true"
+                       aria-labelledby="revision-dialog-title"
+                       tabIndex={-1}
+                       initial={{ scale: 0.95, y: 10, opacity: 0 }}
                       animate={{ scale: 1, y: 0, opacity: 1 }}
                       exit={{ scale: 0.95, y: 10, opacity: 0 }}
                       className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col"
                       onClick={(e) => e.stopPropagation()}
                     >
                       <div className="p-4 border-b border-zinc-100 flex items-center justify-between bg-zinc-50">
-                        <h3 className="font-bold text-zinc-900 flex items-center gap-2">
+                         <h3 id="revision-dialog-title" className="font-bold text-zinc-900 flex items-center gap-2">
                           <MessageSquare className="w-4 h-4 text-indigo-500" />
                           Request Revision
                         </h3>
-                        <button onClick={() => setRequestModalOpen(false)} className="text-zinc-400 hover:text-zinc-600">
+                         <button type="button" onClick={() => setRequestModalOpen(false)} aria-label="Close revision request" className="text-zinc-400 hover:text-zinc-600">
                           <X className="w-5 h-5" />
                         </button>
                       </div>

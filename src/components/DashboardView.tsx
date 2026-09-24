@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from "motion/react";
-import { Copy, Trash2, Grid, Settings, Shield, Search, RefreshCcw, TrendingUp, AlertCircle, CheckCircle2, Clock, RotateCcw, ChevronRight, Lock, Plus, LogOut, Sun, Moon } from "lucide-react";
+import { Trash2, Grid, Settings, Shield, Search, RefreshCcw, TrendingUp, AlertCircle, CheckCircle2, Clock, RotateCcw, ChevronRight, Lock, Plus, LogOut, Sun, Moon, Bot, Megaphone, Share2 } from "lucide-react";
 import { useToast } from "./Toast";
 import { useState, useEffect } from "react";
 import useSWR from "swr";
@@ -7,6 +7,9 @@ import TenantManagerModal from "./TenantManagerModal";
 import ConfirmDialog from "./ConfirmDialog";
 import ActivityFeed from "./ActivityFeed";
 import UserManagementModal from "./UserManagementModal";
+import McpKeysModal from "./McpKeysModal";
+import UpdatesModal from "./UpdatesModal";
+import ShareClientLinkModal from "./ShareClientLinkModal";
 import { ActivityEvent } from "../types";
 import { Button } from "./ui/Button";
 import { useTheme } from "../theme";
@@ -17,6 +20,7 @@ interface Tenant {
     name: string;
     logoUrl: string;
     bio?: string;
+    lastActive?: string;
     settings: {
         internalToken?: string;
         clientToken?: string;
@@ -42,7 +46,6 @@ interface GlobalStats {
     }[];
 }
 
-type AgencyRole = "super-admin" | "graphic-designer" | "marketing-team" | "reviewer";
 
 export default function DashboardView({
     tenants,
@@ -71,11 +74,16 @@ export default function DashboardView({
     const [showManager, setShowManager] = useState(false);
     const [managerMode, setManagerMode] = useState<"list" | "new">("list");
     const [showUserModal, setShowUserModal] = useState(false);
+    const [showMcpModal, setShowMcpModal] = useState(false);
+    const [showUpdatesModal, setShowUpdatesModal] = useState(false);
+    const [unreadUpdates, setUnreadUpdates] = useState(0);
     const [showActivity, setShowActivity] = useState(true);
     const [search, setSearch] = useState("");
+    const [tenantShown, setTenantShown] = useState(12);
     const [confirmDelete, setConfirmDelete] = useState<{ open: boolean; id: string; name: string }>({
         open: false, id: "", name: ""
     });
+    const [shareTenant, setShareTenant] = useState<Tenant | null>(null);
 
     const openManager = (mode: "list" | "new") => {
         setManagerMode(mode);
@@ -91,14 +99,37 @@ export default function DashboardView({
 
     const { data: stats, mutate: mutateStats } = useSWR<GlobalStats>(adminToken ? "/api/stats" : null, fetcher);
 
-    const copyLink = (e: React.MouseEvent, type: "internal" | "client", tenant: Tenant) => {
+    useEffect(() => {
+        if (!adminToken) return;
+        fetch("/api/updates/unread-count", { headers: { Authorization: `Bearer ${adminToken}` } })
+            .then((r) => (r.ok ? r.json() : { count: 0 }))
+            .then((d) => {
+                const n = Number(d.count) || 0;
+                setUnreadUpdates(n);
+                if (n > 0 && sessionStorage.getItem("rr_updates_prompted") !== "1") {
+                    sessionStorage.setItem("rr_updates_prompted", "1");
+                    setShowUpdatesModal(true);
+                }
+            })
+            .catch(() => {});
+    }, [adminToken]);
+
+    const copyAgencyLink = async (e: React.MouseEvent, tenant: Tenant) => {
         e.stopPropagation();
         e.preventDefault();
-        const token = type === "internal" ? tenant.settings.internalToken : tenant.settings.clientToken;
-        const basePath = type === "internal" ? `/agency/${tenant.id}` : `/client/${tenant.id}`;
-        const url = `${window.location.origin}${basePath}?token=${token}`;
-        navigator.clipboard.writeText(url);
-        success(`${type === "internal" ? "Agency" : "Client"} link copied`);
+        const res = await fetch(`/api/tenants/${tenant.id}/invite`, {
+            headers: { Authorization: `Bearer ${adminToken}` },
+            credentials: "include",
+        });
+        if (!res.ok) { toastError("Could not load agency access link"); return; }
+        const data = await res.json();
+        if (!data.agencyUrl) { toastError("Agency access link missing"); return; }
+        try {
+            await navigator.clipboard.writeText(data.agencyUrl);
+            success("Agency link copied");
+        } catch {
+            toastError("Could not copy the agency access link");
+        }
     };
 
     const rotateToken = async (e: React.MouseEvent, tenant: Tenant, tokenType: "client" | "internal" | "both") => {
@@ -246,6 +277,7 @@ export default function DashboardView({
         t.name.toLowerCase().includes(search.toLowerCase()) ||
         t.id.toLowerCase().includes(search.toLowerCase())
     );
+    const visibleTenants = filteredTenants.slice(0, tenantShown);
 
     const getTenantStats = (id: string) => stats?.perTenant.find(p => p.tenantId === id);
 
@@ -309,7 +341,7 @@ export default function DashboardView({
 
                 {/* Header */}
                 <div className="max-w-7xl mx-auto w-full px-6 pt-8 pb-6">
-                    <header className="flex items-center justify-between mb-8">
+                    <header className="flex flex-wrap items-center justify-between gap-3 mb-8">
                         <div className="flex items-center gap-4">
                             <OsirisLogo size={40} className="shrink-0" />
                             <div>
@@ -335,15 +367,16 @@ export default function DashboardView({
                                 />
                                 {/* Search Results Dropdown */}
                                 {search.length >= 2 && searchResults && Array.isArray(searchResults) && searchResults.length > 0 && (
-                                    <div className="absolute top-full left-0 right-0 mt-2 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl shadow-black/60 overflow-hidden z-[100] min-w-[320px]">
+                                    <div className="absolute top-full left-0 right-0 mt-2 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl shadow-black/60 overflow-y-auto max-h-80 z-[100] min-w-[320px]">
                                         {searchResults.slice(0, 10).map((r: any, i: number) => (
                                             <button
                                                 key={r.postId ?? i}
                                                 onClick={() => {
+                                                    const match = tenants.find((t) => t.id === r.tenantId);
                                                     onSelectTenant(
-                                                        { id: r.tenantId, name: r.clientName || r.tenantId, logoUrl: '', settings: {} } as any,
+                                                        match || { id: r.tenantId, name: r.clientName || r.tenantId, logoUrl: "", settings: {} } as Tenant,
                                                         "internal",
-                                                        adminToken
+                                                        match?.settings?.internalToken || ""
                                                     );
                                                     setSearch("");
                                                 }}
@@ -370,9 +403,26 @@ export default function DashboardView({
                                     </div>
                                 )}
                             </div>
+                            <button
+                                onClick={() => setShowUpdatesModal(true)}
+                                className="relative p-2 rounded-xl text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50 transition-colors"
+                                title="What's new"
+                            >
+                                <Megaphone className="w-4 h-4" />
+                                {unreadUpdates > 0 && (
+                                    <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full bg-indigo-500 text-[9px] font-black text-white flex items-center justify-center">
+                                        {unreadUpdates > 9 ? "9+" : unreadUpdates}
+                                    </span>
+                                )}
+                            </button>
                             {isSuperAdmin && (
                                 <Button variant="secondary" onClick={() => setShowUserModal(true)} icon={<Shield className="w-4 h-4" />}>
                                     <span className="hidden lg:inline">Users</span>
+                                </Button>
+                            )}
+                            {isSuperAdmin && (
+                                <Button variant="secondary" onClick={() => setShowMcpModal(true)} icon={<Bot className="w-4 h-4" />}>
+                                    <span className="hidden lg:inline">MCP</span>
                                 </Button>
                             )}
                             <Button
@@ -398,8 +448,8 @@ export default function DashboardView({
                     </header>
 
                     {/* Client Grid */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 gap-5">
-                        {filteredTenants.map(tenant => {
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+                        {visibleTenants.map(tenant => {
                             const ts = getTenantStats(tenant.id);
                             const approvalRate = ts && ts.total > 0 ? Math.round((ts.approved / ts.total) * 100) : 0;
                             const circumference = 2 * Math.PI * 22;
@@ -484,22 +534,22 @@ export default function DashboardView({
                                             <div className="flex-1 h-px bg-zinc-800/50" />
                                         </div>
                                         <div className="grid grid-cols-2 gap-2">
-                                            <Button
-                                                variant="outline"
-                                                onClick={(e) => copyLink(e, "internal", tenant)}
-                                                icon={<Grid className="w-3.5 h-3.5" />}
-                                                className="w-full text-xs py-2 hover:border-indigo-500/40 hover:text-indigo-300"
-                                            >
-                                                Agency
-                                            </Button>
-                                            <Button
-                                                variant="outline"
-                                                onClick={(e) => copyLink(e, "client", tenant)}
-                                                icon={<Copy className="w-3.5 h-3.5" />}
-                                                className="w-full text-xs py-2 hover:border-emerald-500/40 hover:text-emerald-300"
-                                            >
-                                                Client
-                                            </Button>
+                                             <Button
+                                                 variant="outline"
+                                                 onClick={(e) => copyAgencyLink(e, tenant)}
+                                                 icon={<Grid className="w-3.5 h-3.5" />}
+                                                 className="w-full text-xs py-2 hover:border-indigo-500/40 hover:text-indigo-300"
+                                             >
+                                                 Agency link
+                                             </Button>
+                                             <Button
+                                                 variant="outline"
+                                                 onClick={(e) => { e.stopPropagation(); e.preventDefault(); setShareTenant(tenant); }}
+                                                 icon={<Share2 className="w-3.5 h-3.5" />}
+                                                 className="w-full text-xs py-2 hover:border-emerald-500/40 hover:text-emerald-300"
+                                             >
+                                                 Share client
+                                             </Button>
                                         </div>
 
                                         {/* Token rotation & delete — hover reveal (super-admin only) */}
@@ -540,6 +590,15 @@ export default function DashboardView({
                             );
                         })}
                     </div>
+                    {filteredTenants.length > tenantShown && (
+                        <button
+                            type="button"
+                            onClick={() => setTenantShown((n) => n + 12)}
+                            className="mt-4 w-full py-2.5 text-xs font-black uppercase tracking-widest text-indigo-400 hover:bg-indigo-950/40 rounded-xl border border-indigo-900/60"
+                        >
+                            Show more ({filteredTenants.length - tenantShown})
+                        </button>
+                    )}
 
                     {filteredTenants.length === 0 && (
                         <div className="text-center py-20 text-zinc-600 border border-dashed border-zinc-800 rounded-2xl">
@@ -566,8 +625,16 @@ export default function DashboardView({
                 )}
             </AnimatePresence>
 
-            <TenantManagerModal
-                isOpen={showManager}
+             <ShareClientLinkModal
+                 isOpen={!!shareTenant}
+                 onClose={() => setShareTenant(null)}
+                 tenant={shareTenant ? { id: shareTenant.id, name: shareTenant.name } : null}
+                 adminToken={adminToken}
+                 currentUser={currentUser}
+             />
+
+             <TenantManagerModal
+                 isOpen={showManager}
                 onClose={() => setShowManager(false)}
                 tenants={tenants}
                 onUpsert={onUpsertTenant}
@@ -579,6 +646,20 @@ export default function DashboardView({
                 isOpen={showUserModal}
                 onClose={() => setShowUserModal(false)}
                 adminToken={adminToken}
+            />
+
+            <McpKeysModal
+                isOpen={showMcpModal}
+                onClose={() => setShowMcpModal(false)}
+                adminToken={adminToken}
+            />
+
+            <UpdatesModal
+                isOpen={showUpdatesModal}
+                onClose={() => setShowUpdatesModal(false)}
+                adminToken={adminToken}
+                isSuperAdmin={isSuperAdmin}
+                onUnreadChange={setUnreadUpdates}
             />
 
             <ConfirmDialog

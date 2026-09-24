@@ -2,10 +2,13 @@
  * Create a single-post client review magic link and copy it to the clipboard.
  * Requires agency session (Bearer) or tenant internal token in localStorage.
  */
+import { withReviewerFragment } from "./reviewerProfile";
+
 export async function createAndCopyClientPostShare(opts: {
   tenantId: string;
   postId: string;
   adminToken?: string;
+  reviewerName?: string;
 }): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
   const intTkn =
     typeof localStorage !== "undefined" ? localStorage.getItem(`osiris_${opts.tenantId}_internal`) || "" : "";
@@ -26,10 +29,11 @@ export async function createAndCopyClientPostShare(opts: {
     });
     const data = (await res.json().catch(() => ({}))) as { error?: string; shareUrl?: string; sharePath?: string };
     if (!res.ok) return { ok: false, error: data.error || "Could not create share link." };
-    const url =
+    const baseUrl =
       data.shareUrl ||
       `${typeof window !== "undefined" ? window.location.origin : ""}${data.sharePath || ""}`;
-    if (!url) return { ok: false, error: "Server did not return a link." };
+    if (!baseUrl) return { ok: false, error: "Server did not return a link." };
+    const url = withReviewerFragment(baseUrl, opts.reviewerName || "");
     await navigator.clipboard.writeText(url);
     return { ok: true, url };
   } catch {

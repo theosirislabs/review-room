@@ -1,16 +1,21 @@
-import { StrictMode, useState, useEffect, useCallback, useMemo } from "react";
+import { StrictMode, Suspense, lazy, useState, useEffect, useCallback, useMemo, useRef } from "react";
 import useSWR from "swr";
 import { BrowserRouter, useLocation, useNavigate } from "react-router-dom";
 import { Post, TeamMember, ActivityEvent } from "./types";
-import ClientView from "./components/ClientView";
-import InternalView from "./components/InternalView";
 import { ToastProvider, useToast } from "./components/Toast";
-import { motion, AnimatePresence } from "motion/react";
-import DashboardView from "./components/DashboardView";
+import { motion } from "motion/react";
 import { EyeOff, Loader2, Lock, Layout, RefreshCcw } from "lucide-react";
 import { io, Socket } from "socket.io-client";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { isPostVisibleToClient } from "./utils";
+import { removeQueryParam } from "./routeState";
+import { reviewerNameFromHash } from "./reviewerProfile";
+
+// A client review link must not download the agency dashboard, analytics, and
+// modal tree before the reviewer can see their posts.
+const ClientView = lazy(() => import("./components/ClientView"));
+const InternalView = lazy(() => import("./components/InternalView"));
+const DashboardView = lazy(() => import("./components/DashboardView"));
 
 /* ── Types ─────────────────────────────────────────────────── */
 interface Tenant {
@@ -23,7 +28,67 @@ interface Tenant {
 }
 
 /* ── Skeleton ──────────────────────────────────────────────── */
-function GridSkeleton() {
+/* ── No Access Token View ──────────────────────────── */
+function NoAccessTokenView({ tenantId }: { tenantId: string }) {
+  return (
+    <div className="min-h-screen bg-zinc-50 flex flex-col items-center justify-center p-6">
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+        className="w-full max-w-md text-center">
+        <div className="w-20 h-20 bg-amber-100 border border-amber-200 rounded-[2rem] flex items-center justify-center text-amber-600 mb-8 mx-auto">
+          <Lock className="w-10 h-10" />
+        </div>
+        <h1 className="text-3xl font-black text-zinc-900 tracking-tighter mb-3">
+          Access Required
+        </h1>
+        <p className="text-zinc-500 text-sm mb-6 leading-relaxed">
+          This is a client review portal. You need a secure invite link
+          to access <strong className="text-zinc-800">{tenantId}</strong>&apos;s content.
+        </p>
+        <div className="bg-white border border-zinc-200 rounded-2xl p-5 text-left mb-8 space-y-3">
+          <p className="text-xs font-bold uppercase tracking-widest text-zinc-400">
+            How to get access
+          </p>
+          <p className="text-sm text-zinc-600">
+            Your agency should have sent you a link that looks like:
+          </p>
+          <code className="block text-xs bg-zinc-100 text-zinc-700 px-3 py-2 rounded-xl font-mono break-all">
+            https://review-room.theosirislabs.com/client/{tenantId}?token=...
+          </code>
+          <p className="text-sm text-zinc-600">
+            If you lost your link, contact your agency to request a new one.
+          </p>
+        </div>
+        <button onClick={() => window.location.reload()}
+          className="w-full flex items-center justify-center gap-2 bg-zinc-900 text-white font-bold py-4 rounded-2xl hover:bg-zinc-800 transition-all active:scale-[0.98]">
+          <RefreshCcw className="w-4 h-4" /> TRY AGAIN
+        </button>
+      </motion.div>
+    </div>
+  );
+}
+
+function GridSkeleton({ client }: { client?: boolean }) {
+  if (client) {
+    return (
+      <div className="min-h-screen bg-zinc-50">
+        <div className="h-14 bg-white border-b border-zinc-200 w-full" />
+        <div className="p-6 max-w-4xl mx-auto">
+          <div className="flex items-center gap-4 mb-8">
+            <div className="skeleton w-16 h-16 rounded-full" />
+            <div className="space-y-2 flex-1">
+              <div className="skeleton h-4 w-40 rounded" />
+              <div className="skeleton h-3 w-64 rounded" />
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-1">
+            {Array.from({ length: 9 }).map((_, i) => (
+              <div key={i} className="skeleton aspect-[4/5] w-full rounded-lg" />
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="min-h-screen bg-zinc-50">
       <div className="h-14 bg-white border-b border-zinc-200 w-full" />
@@ -36,7 +101,7 @@ function GridSkeleton() {
         <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
           {Array.from({ length: 10 }).map((_, i) => (
             <div key={i} className="rounded-xl overflow-hidden bg-white border border-zinc-200 p-2">
-              <div className="skeleton aspect-[4/5] w-full rounded-lg" />
+              <div className="skeleton h-36 w-full rounded-lg" />
               <div className="p-3 space-y-2">
                 <div className="skeleton h-3 w-3/4 rounded" />
                 <div className="skeleton h-3 w-1/2 rounded" />
@@ -64,18 +129,24 @@ function AppContent() {
   const derivedTenant = isClientPath || isAgencyPath ? location.pathname.split("/")[2] : null;
   const viewMode = isReviewSharePath ? "client" : isClientPath ? "client" : "internal";
 
+  const routeScope = `${derivedTenant || ""}:${viewMode}:${reviewShareToken}:${shareSetToken}`;
+  const routeScopeRef = useRef(routeScope);
+  routeScopeRef.current = routeScope;
   const searchParams = new URLSearchParams(location.search);
   const urlToken = searchParams.get("token");
+  const reviewerName = useMemo(() => reviewerNameFromHash(location.hash), [location.hash]);
+  const pendingTokenRef = useRef<{ scope: string; value: string } | null>(null);
 
-  // Consume token
   useEffect(() => {
     if (derivedTenant && urlToken && !isReviewSharePath) {
-      localStorage.setItem(`osiris_${derivedTenant}_${viewMode}`, urlToken);
-      navigate(location.pathname, { replace: true });
+      pendingTokenRef.current = { scope: routeScope, value: urlToken };
+      const nextSearch = removeQueryParam(location.search, "token");
+       navigate(`${location.pathname}${nextSearch}${location.hash}`, { replace: true });
     }
-  }, [derivedTenant, viewMode, urlToken, navigate, location.pathname, isReviewSharePath]);
+  }, [derivedTenant, urlToken, navigate, location.pathname, location.search, location.hash, isReviewSharePath, routeScope]);
 
-  const token = urlToken || (derivedTenant ? (localStorage.getItem(`osiris_${derivedTenant}_${viewMode}`) || "") : "");
+  const pendingToken = pendingTokenRef.current?.scope === routeScope ? pendingTokenRef.current.value : "";
+  const token = urlToken || pendingToken || (derivedTenant ? (localStorage.getItem(`osiris_${derivedTenant}_${viewMode}`) || "") : "");
   const tenantId = derivedTenant;
 
   const [posts, setPosts] = useState<Post[]>([]);
@@ -90,6 +161,7 @@ function AppContent() {
   });
   const [connected, setConnected] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [loadedScope, setLoadedScope] = useState("");
   const [liveEvents, setLiveEvents] = useState<ActivityEvent[]>([]);
 
   const isClientLink = isClientPath || isReviewSharePath;
@@ -103,8 +175,6 @@ function AppContent() {
     if (!tid) return !!adminToken;
     return !!(adminToken || localStorage.getItem(`osiris_${tid}_internal`));
   }, [adminToken, workspaceTenantId, tenantId]);
-
-  useEffect(() => { setLoaded(false); }, [tenantId, reviewShareToken, shareSetToken]);
 
   // Authentik SSO callback: cookie session → localStorage token
   useEffect(() => {
@@ -182,38 +252,78 @@ function AppContent() {
 
   const [authError, setAuthError] = useState<string | null>(null);
 
+  useEffect(() => {
+    setLoaded(false);
+    setLoadedScope("");
+    setAuthError(null);
+    if (pendingTokenRef.current && pendingTokenRef.current.scope !== routeScope) {
+      pendingTokenRef.current = null;
+    }
+  }, [routeScope]);
+
+  const isClientPreview = isAgencyPath && searchParams.get("preview") === "client" && (!!adminToken || !!token);
+  const renderClientSurface = viewMode === "client" || isClientPreview;
+
   /* ── Socket setup ── */
   useEffect(() => {
-    const sock = io({ transports: ["websocket", "polling"] });
-    setSocket(sock);
+    const sock = io({
+      transports: ["websocket", "polling"],
+      auth: adminToken ? { token: adminToken } : undefined,
+     });
+     setSocket(sock);
+     const isCurrentScope = () => routeScopeRef.current === routeScope;
 
-    sock.on("connect", () => {
-      setConnected(true);
+     sock.on("connect", () => {
+       if (!isCurrentScope()) return;
+       setConnected(true);
       if (shareSetToken) {
-        sock.emit("join-share-set", { shareSetToken });
+        sock.emit("join-share-set", { token: shareSetToken });
       } else if (reviewShareToken) {
         sock.emit("join-post-share", { shareToken: reviewShareToken });
       } else if (tenantId) {
-        sock.emit("join-tenant", { tenantId, mode: viewMode, token: token });
+        const joinToken = token || (viewMode === "internal" ? adminToken : "");
+        sock.emit("join-tenant", { tenantId, mode: viewMode, token: joinToken });
       }
     });
 
-    sock.on("error", (msg: string) => {
-      setAuthError(msg);
-    });
+     sock.on("error", (msg: string) => {
+       if (!isCurrentScope()) return;
+       if (/unauthorized|invalid or missing|workspace not found|expired|revoked|secure/i.test(msg)) {
+         setAuthError(msg);
+       } else {
+         toastError(msg);
+       }
+     });
 
-    sock.on("disconnect", () => setConnected(false));
-    sock.on("initial-data", (data: { posts: Post[]; tenant: Tenant }) => {
-      setPosts(data.posts);
-      setTenant(data.tenant);
-      setLoaded(true);
-    });
+     sock.on("disconnect", () => {
+       if (isCurrentScope()) setConnected(false);
+     });
+     sock.on("initial-data", (data: { posts: Post[]; tenant: Tenant }) => {
+       if (routeScopeRef.current !== routeScope) return;
+       const pendingToken = pendingTokenRef.current?.scope === routeScope ? pendingTokenRef.current.value : "";
+       if (pendingToken && derivedTenant) {
+         localStorage.setItem(`osiris_${derivedTenant}_${viewMode}`, pendingToken);
+         pendingTokenRef.current = null;
+       }
+       setPosts(data.posts);
+       setTenant(data.tenant);
+       setLoadedScope(routeScope);
+       setLoaded(true);
+     });
 
-    sock.on("post-created", (post: Post) => setPosts((c: Post[]) => [...c, post]));
-    sock.on("post-updated", (post: Post) =>
-      setPosts((c: Post[]) => {
+     sock.on("post-created", (post: Post) => {
+       if (!isCurrentScope()) return;
+       setPosts((c: Post[]) => [...c, post]);
+     });
+     sock.on("post-updated", (post: Post) => {
+       if (!isCurrentScope()) return;
+       setPosts((c: Post[]) => {
         const hideFromMainClientBoard = viewMode === "client" && !isReviewSharePath;
+        const archived = !!(post as any).archivedAt;
         const idx = c.findIndex((p: Post) => p.id === post.id);
+        if (archived) {
+          return idx >= 0 ? c.filter((p: Post) => p.id !== post.id) : c;
+        }
         if (idx >= 0) {
           if (hideFromMainClientBoard && !isPostVisibleToClient(post.clientStatus)) {
             return c.filter((p: Post) => p.id !== post.id);
@@ -224,36 +334,44 @@ function AppContent() {
           return [...c, post];
         }
         if (isReviewSharePath) {
-          return [post];
+          return [...c, post];
+        }
+        if (viewMode !== "client") {
+          return [...c, post];
         }
         return c;
-      })
-    );
-    sock.on("client-post-removed", (postId: string) => {
-      if (viewMode !== "client" || isReviewSharePath) return;
+       });
+      });
+      sock.on("client-post-removed", (postId: string) => {
+       if (!isCurrentScope() || viewMode !== "client" || isReviewSharePath) return;
       setPosts((c: Post[]) => c.filter((p: Post) => p.id !== postId));
     });
-    sock.on("post-deleted", (id: string) =>
-      setPosts((c: Post[]) => c.filter((p: Post) => p.id !== id))
-    );
-    sock.on("activity", (ev: ActivityEvent) =>
-      setLiveEvents(prev => [...prev.slice(-49), ev])
-    );
-    sock.on("team-updated", () => {
-      mutateTeam();
-    });
+     sock.on("post-deleted", (id: string) => {
+       if (!isCurrentScope()) return;
+       setPosts((c: Post[]) => c.filter((p) => p.id !== id));
+     });
+     sock.on("activity", (ev: ActivityEvent) => {
+       if (!isCurrentScope()) return;
+       setLiveEvents(prev => [...prev.slice(-49), ev]);
+     });
+     sock.on("team-updated", () => {
+       if (!isCurrentScope()) return;
+       mutateTeam();
+     });
 
-    sock.on("tenant-updated", (t: Tenant) => {
-      mutateTenants();
-      if (t.id === tenantId || t.id === tenant?.id) setTenant(t);
-    });
-    sock.on("tenant-deleted", (id: string) => {
-      mutateTenants();
+     sock.on("tenant-updated", (t: Tenant) => {
+       if (!isCurrentScope()) return;
+       mutateTenants();
+       if (t.id === tenantId || t.id === tenant?.id) setTenant(t);
+     });
+     sock.on("tenant-deleted", (id: string) => {
+       if (!isCurrentScope()) return;
+       mutateTenants();
       if (id === tenantId || id === tenant?.id) window.location.href = "/";
     });
 
     return () => { sock.disconnect(); };
-  }, [tenantId, viewMode, token, reviewShareToken, shareSetToken, isReviewSharePath, tenant?.id]);
+   }, [routeScope, token, isReviewSharePath, adminToken]);
 
   const emit = useCallback(
     (event: string, data: any, cb?: (res: any) => void) => socket?.emit(event, data, cb),
@@ -273,15 +391,27 @@ function AppContent() {
     navigate(path);
   };
 
+  const handlePreviewClient = useCallback((id?: string) => {
+    const targetId = id || workspaceTenantId || tenantId;
+    if (!targetId) return;
+    navigate(`/agency/${targetId}?preview=client`);
+  }, [navigate, tenantId, workspaceTenantId]);
+
+  const previewNoop = useCallback(() => undefined, []);
+
   /* ── Post handlers ── */
   const handleUpdatePost = useCallback(
     (p: Post) => {
       const tid = workspaceTenantId;
       if (!tid) return;
       emit("update-post", { tenantId: tid, post: p }, (updated: Post | null) => {
-        if (updated) {
-          setPosts((prev: Post[]) => prev.map((x: Post) => (x.id === updated.id ? updated : x)));
-        }
+        if (!updated) return;
+        setPosts((prev: Post[]) => {
+          if ((updated as any).archivedAt) return prev.filter((x: Post) => x.id !== updated.id);
+          const idx = prev.findIndex((x: Post) => x.id === updated.id);
+          if (idx >= 0) return prev.map((x: Post) => (x.id === updated.id ? updated : x));
+          return [...prev, updated];
+        });
       });
     },
     [emit, workspaceTenantId]
@@ -366,10 +496,26 @@ function AppContent() {
   );
 
   /* ── Share link helper ── */
-  const handleCopyShareLink = () => {
-    const tkn = tenant?.settings?.clientToken || "";
+  const handleCopyShareLink = async () => {
     const tid = tenantId || tenant?.id;
     if (!tid) return;
+    if (adminToken) {
+      try {
+        const res = await fetch(`/api/tenants/${tid}/invite`, {
+          headers: { Authorization: `Bearer ${adminToken}` },
+          credentials: "include",
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.clientUrl) {
+            await navigator.clipboard.writeText(data.clientUrl);
+            success("Client-only secure link copied to clipboard");
+            return;
+          }
+        }
+      } catch { /* fall through */ }
+    }
+    const tkn = tenant?.settings?.clientToken || "";
     const url = `${window.location.origin}/client/${tid}?token=${tkn}`;
     navigator.clipboard.writeText(url);
     success("Client-only secure link copied to clipboard");
@@ -410,26 +556,34 @@ function AppContent() {
     );
   }
 
-  if (!tenantId && !reviewShareToken) {
+  // If client path with no token and no admin session, show guidance
+  const missingClientToken = isClientPath && !reviewShareToken && !token && !adminToken;
+  if (missingClientToken) {
+    return <NoAccessTokenView tenantId={tenantId || derivedTenant || ''} />;
+  }
+
+  if (!tenantId && !reviewShareToken && !shareSetToken) {
     return (
-      <DashboardView
-        tenants={tenants}
-        adminToken={adminToken}
-        setAdminToken={setAdminToken}
-        currentUser={currentUser}
-        setCurrentUser={setCurrentUser}
-        onUpsertTenant={handleUpsertTenant}
-        onDeleteTenant={handleDeleteTenant}
-        onSelectTenant={(t, type, tkn) => handleSwitchTenant(t.id, type, tkn)}
-        liveEvents={liveEvents}
-      />
+      <Suspense fallback={<GridSkeleton />}>
+        <DashboardView
+          tenants={tenants}
+          adminToken={adminToken}
+          setAdminToken={setAdminToken}
+          currentUser={currentUser}
+          setCurrentUser={setCurrentUser}
+          onUpsertTenant={handleUpsertTenant}
+          onDeleteTenant={handleDeleteTenant}
+          onSelectTenant={(t, type, tkn) => handleSwitchTenant(t.id, type, tkn)}
+          liveEvents={liveEvents}
+        />
+      </Suspense>
     );
   }
 
-  if (!loaded)
+  if (!loaded || loadedScope !== routeScope)
     return (
       <>
-        <GridSkeleton />
+        <GridSkeleton client={renderClientSurface} />
         <div className="fixed bottom-4 left-4 z-[200] flex items-center gap-2 px-3 py-1.5 bg-zinc-900/90 text-white rounded-full text-[10px] font-bold">
           <Loader2 className="w-3 h-3 animate-spin" /> LOAD
         </div>
@@ -438,81 +592,93 @@ function AppContent() {
 
   return (
     <div className="relative min-h-screen bg-zinc-900 overflow-hidden">
-      <AnimatePresence mode="wait">
-        {viewMode === "internal" ? (
-          <motion.div
-            key="internal"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="absolute inset-0 overflow-auto"
-          >
-            <InternalView
-              posts={posts}
-              tenantId={tenantId}
-              brandName={tenant?.name || tenantId}
-              tenants={tenants}
-              adminToken={adminToken}
-              currentUser={currentUser}
-              teamMembers={teamMembers}
-              onSwitchTenant={handleSwitchTenant}
-              onUpdatePost={handleUpdatePost}
-              onAddComment={handleAddComment}
-              onDeleteComment={handleDeleteComment}
-              onAddTask={handleAddTask}
-              onDeleteTask={handleDeleteTask}
-              onToggleTask={handleToggleTask}
-              onCreatePost={handleCreatePost}
-              onCreatePostsBulk={handleCreatePostsBulk}
-              onDeletePost={handleDeletePost}
-              onUpsertTenant={handleUpsertTenant}
-              onDeleteTenant={handleDeleteTenant}
-              onCopyShareLink={handleCopyShareLink}
-              emit={emit}
-            />
-          </motion.div>
-        ) : (
-          <motion.div
-            key="client"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="absolute inset-0 overflow-auto"
-          >
-            {/* Client view floating controls — only visible in internal preview mode */}
-            {!isClientLink && (
-              <div className="fixed bottom-6 right-6 z-[100] flex flex-col gap-3">
-                <button
-                  onClick={handleCopyShareLink}
-                  className="bg-white text-zinc-900 px-4 py-2.5 rounded-full shadow-2xl flex items-center gap-2 hover:bg-zinc-50 border border-zinc-200 font-bold text-sm"
-                >
-                  Copy Link
-                </button>
-                <button
-                  onClick={() => navigate(`/agency/${workspaceTenantId || tenantId}`)}
-                  className="bg-zinc-900/95 text-white pl-3 pr-4 py-2.5 rounded-full shadow-2xl flex items-center gap-2 hover:bg-zinc-800 border border-zinc-700/50 font-bold text-sm"
-                >
-                  <EyeOff className="w-4 h-4" /> Exit
-                </button>
-              </div>
-            )}
-            <ClientView
-              posts={posts}
-              tenantId={workspaceTenantId || tenantId || ""}
-              brandName={tenant?.name || workspaceTenantId || tenantId || "Review"}
-              logoUrl={tenant?.logoUrl}
-              bio={tenant?.bio}
-              singlePostShareMode={!!reviewShareToken}
-              shareSetMode={!!shareSetToken}
-              postShareLinkEligible={postShareLinkEligible}
-              adminToken={adminToken}
-              onUpdatePost={handleUpdatePost}
-              onAddComment={handleAddComment}
-              onDeleteComment={handleDeleteComment}
-            />
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <Suspense fallback={<GridSkeleton client={renderClientSurface} />}>
+        {viewMode === "internal" && !isClientPreview ? (
+            <motion.div
+              key="internal"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 overflow-auto"
+            >
+              <InternalView
+                posts={posts}
+                tenantId={tenantId ?? ""}
+                brandName={tenant?.name || tenantId || ""}
+                tenants={tenants}
+                adminToken={adminToken}
+                currentUser={currentUser}
+                teamMembers={teamMembers}
+                onSwitchTenant={handleSwitchTenant}
+                onUpdatePost={handleUpdatePost}
+                onAddComment={handleAddComment}
+                onDeleteComment={handleDeleteComment}
+                onAddTask={handleAddTask}
+                onDeleteTask={handleDeleteTask}
+                onToggleTask={handleToggleTask}
+                onCreatePost={handleCreatePost}
+                onCreatePostsBulk={handleCreatePostsBulk}
+                onDeletePost={handleDeletePost}
+                onUpsertTenant={handleUpsertTenant}
+                onDeleteTenant={handleDeleteTenant}
+                onCopyShareLink={handleCopyShareLink}
+                onPreviewClient={() => handlePreviewClient()}
+                emit={emit}
+              />
+            </motion.div>
+          ) : (
+            <motion.div
+              key="client"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 overflow-auto"
+            >
+              {isClientPreview ? (
+                <div className="fixed bottom-6 right-6 z-[100] flex items-center gap-3 rounded-full bg-zinc-900/95 pl-4 pr-2 py-2 text-white shadow-2xl border border-zinc-700/50">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-indigo-200">Client preview</span>
+                  <button
+                    onClick={() => navigate(`/agency/${workspaceTenantId || tenantId}`)}
+                    className="flex items-center gap-2 rounded-full bg-white px-3 py-2 text-xs font-bold text-zinc-900 transition-colors hover:bg-zinc-100"
+                  >
+                    <EyeOff className="w-4 h-4" /> Exit preview
+                  </button>
+                </div>
+              ) : !isClientLink ? (
+                <div className="fixed bottom-6 right-6 z-[100] flex flex-col gap-3">
+                  <button
+                    onClick={handleCopyShareLink}
+                    className="bg-white text-zinc-900 px-4 py-2.5 rounded-full shadow-2xl flex items-center gap-2 hover:bg-zinc-50 border border-zinc-200 font-bold text-sm"
+                  >
+                    Copy Link
+                  </button>
+                  <button
+                    onClick={() => navigate(`/agency/${workspaceTenantId || tenantId}`)}
+                    className="bg-zinc-900/95 text-white pl-3 pr-4 py-2.5 rounded-full shadow-2xl flex items-center gap-2 hover:bg-zinc-800 border border-zinc-700/50 font-bold text-sm"
+                  >
+                    <EyeOff className="w-4 h-4" /> Exit
+                  </button>
+                </div>
+              ) : null}
+              <ClientView
+                posts={posts}
+                tenantId={workspaceTenantId || tenantId || ""}
+                brandName={tenant?.name || workspaceTenantId || tenantId || "Review"}
+                 logoUrl={tenant?.logoUrl}
+                 bio={tenant?.bio}
+                 reviewerName={reviewerName}
+                 singlePostShareMode={!!reviewShareToken}
+                shareSetMode={!!shareSetToken}
+                postShareLinkEligible={!isClientPreview && postShareLinkEligible}
+                adminToken={isClientPreview ? "" : adminToken}
+                previewMode={isClientPreview}
+                onUpdatePost={isClientPreview ? previewNoop : handleUpdatePost}
+                onAddComment={isClientPreview ? previewNoop : handleAddComment}
+                onDeleteComment={isClientPreview ? previewNoop : handleDeleteComment}
+              />
+            </motion.div>
+          )}
+      </Suspense>
 
       {/* Sync indicator */}
       <div

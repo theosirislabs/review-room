@@ -2,11 +2,14 @@
  * Create a share set link (multi-post client review) and copy it to the clipboard.
  * Requires agency session (Bearer) or tenant internal token in localStorage.
  */
+import { withReviewerFragment } from "./reviewerProfile";
+
 export async function createShareSetLink(opts: {
   tenantId: string;
   postIds: string[];
   name?: string;
   adminToken?: string;
+  reviewerName?: string;
 }): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
   const intTkn =
     typeof localStorage !== "undefined" ? localStorage.getItem(`osiris_${opts.tenantId}_internal`) || "" : "";
@@ -27,10 +30,11 @@ export async function createShareSetLink(opts: {
     });
     const data = (await res.json().catch(() => ({}))) as { error?: string; url?: string; sharePath?: string };
     if (!res.ok) return { ok: false, error: data.error || "Could not create share set link." };
-    const url =
+    const baseUrl =
       data.url ||
       `${typeof window !== "undefined" ? window.location.origin : ""}${data.sharePath || ""}`;
-    if (!url) return { ok: false, error: "Server did not return a link." };
+    if (!baseUrl) return { ok: false, error: "Server did not return a link." };
+    const url = withReviewerFragment(baseUrl, opts.reviewerName || "");
     await navigator.clipboard.writeText(url);
     return { ok: true, url };
   } catch {

@@ -55,7 +55,8 @@ export function isImageUrl(url: string | undefined): boolean {
  */
 export function shouldRenderAsVideo(url: string | undefined, format: string): boolean {
     if (!url) return false;
-    if (format === "reel") return true; // user explicitly chose reel format
+    if (format === "reel") return true;
+    if (format === "story") return isVideo(url);
     // If URL inspection clearly says video, trust it
     if (isVideo(url)) return true;
     // For Google Drive/Dropbox links whose file extension is ambiguous, trust the format
@@ -93,4 +94,20 @@ export function parseDateSafe(d: string, t: string): number {
 /** Posts with client status "Not Ready for Client" are omitted from the client review link. */
 export function isPostVisibleToClient(clientStatus: string | undefined): boolean {
     return clientStatus !== "Not Ready for Client";
+}
+
+export function tileAspectClass(format: string | undefined): string {
+    return format === "story" ? "aspect-[9/16]" : "aspect-[4/5]";
+}
+
+export function dateOnly(value?: string | null): string {
+    return value ? String(value).slice(0, 10) : "";
+}
+
+/** Compare YYYY-MM-DD in local calendar time — avoid UTC-midnight overdue false positives. */
+export function isOverdue(dueDate?: string | null, now: Date = new Date()): boolean {
+    const d = dateOnly(dueDate);
+    if (!d) return false;
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    return d < today;
 }

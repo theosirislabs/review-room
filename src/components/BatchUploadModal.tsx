@@ -4,12 +4,14 @@ import {
     X, Upload, Grid3X3, Trash2, Loader2, Layers, Zap, ArrowRight, GripVertical
 } from "lucide-react";
 import { useToast } from "./Toast";
+import { uploadStaffFile } from "../mediaUpload";
+import { tileAspectClass } from "../utils";
 
 interface BatchItem {
     id: string;
     url: string;
     title: string;
-    format: "image" | "reel" | "carousel" | "image" | "reel";
+    format: "image" | "reel" | "carousel" | "story";
     file: File;
     remoteUrl?: string;
 }
@@ -62,6 +64,7 @@ export default function BatchUploadModal({ isOpen, onClose, onComplete }: Props)
     };
 
     const handleClose = () => {
+        if (uploading) return;
         clearStagedItems();
         onClose();
     };
@@ -100,19 +103,11 @@ export default function BatchUploadModal({ isOpen, onClose, onComplete }: Props)
 
         try {
             // 1. Upload all files
-            const uploadPromises = items.map(async (item: BatchItem) => {
-                const formData = new FormData();
-                formData.append("file", item.file);
-                const res = await fetch("/api/upload", { method: "POST", body: formData });
-                if (!res.ok) {
-                    const err = await res.json().catch(() => ({}));
-                    throw new Error(err.error || `Upload failed for ${item.file.name}`);
-                }
-                const data = await res.json();
-                return { ...item, remoteUrl: data.url as string };
-            });
-
-            const uploadedItems = await Promise.all(uploadPromises);
+            const uploadedItems: BatchItem[] = [];
+            for (const item of items) {
+                const remoteUrl = await uploadStaffFile(item.file);
+                uploadedItems.push({ ...item, remoteUrl });
+            }
 
             // 2. Prepare posts based on mode
             const finalPosts = [];
@@ -249,19 +244,30 @@ export default function BatchUploadModal({ isOpen, onClose, onComplete }: Props)
                                                     onDragOver={(e) => onThumbDragOver(e, idx)}
                                                     onDrop={(e) => onThumbDrop(e, idx)}
                                                     onDragEnd={() => setDragOverIdx(null)}
-                                                    className={`relative aspect-[4/5] rounded-2xl overflow-hidden group border-2 transition-all cursor-grab active:cursor-grabbing ${dragOverIdx === idx ? "border-indigo-400 scale-105 shadow-xl z-10" : "border-zinc-100 bg-zinc-50 shadow-sm"
-                                                        }`}
+                                                    className={`relative ${tileAspectClass(item.format)} rounded-2xl overflow-hidden group border-2 transition-all cursor-grab active:cursor-grabbing ${dragOverIdx === idx ? "border-indigo-400 scale-105 shadow-xl z-10" : "border-zinc-100 bg-zinc-50 shadow-sm"}`}
                                                 >
-                                                    {item.format === "reel" ? (
+                                                    {item.format === "reel" || (item.format === "story" && item.file.type.startsWith("video/")) ? (
                                                         <video src={item.url} className="w-full h-full object-cover" muted autoPlay loop playsInline />
                                                     ) : (
                                                         <img src={item.url} className="w-full h-full object-cover" alt="" />
                                                     )}
                                                     <div className="absolute inset-0 bg-black/40 sm:opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-2">
                                                         <div className="flex justify-between items-start">
-                                                            <div className="bg-black/40 backdrop-blur-sm text-white text-[10px] px-2 py-0.5 rounded font-bold">
-                                                                {idx + 1}
-                                                            </div>
+                                                            <button
+                                                                type="button"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    setItems((prev) => prev.map((it) => {
+                                                                        if (it.id !== item.id) return it;
+                                                                        const isVid = it.file.type.startsWith("video/");
+                                                                        const format = it.format === "story" ? (isVid ? "reel" : "image") : "story";
+                                                                        return { ...it, format };
+                                                                    }));
+                                                                }}
+                                                                className="bg-black/40 backdrop-blur-sm text-white text-[10px] px-2 py-0.5 rounded font-bold"
+                                                            >
+                                                                {item.format === "story" ? "Story" : item.format === "reel" ? "Reel" : "Feed"}
+                                                            </button>
                                                             <button
                                                                 onClick={(e) => { e.stopPropagation(); removeItem(item.id); }}
                                                                 className="p-1.5 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors shadow-sm"

@@ -1,5 +1,5 @@
 import { useCallback, useState, useRef } from "react";
-import { Upload, X, Play, Loader2, AlertCircle, GripVertical, Camera, Image as ImageIcon, Zap, Link } from "lucide-react";
+import { Upload, X, Play, Loader2, AlertCircle, GripVertical, Image as ImageIcon, Zap, Link } from "lucide-react";
 import { useToast } from "./Toast";
 
 interface MediaUploadZoneProps {
@@ -10,12 +10,19 @@ interface MediaUploadZoneProps {
     maxFiles?: number;
     format?: string;
 }
-import { isVideo, shouldRenderAsVideo } from "../utils";
+import { shouldRenderAsVideo, tileAspectClass } from "../utils";
+import { staffUploadHeaders } from "../mediaUpload";
 
 const CHUNK_SIZE = 25 * 1024 * 1024; // 25MB per chunk (well under Cloudflare 100MB limit)
 /** Use chunked upload above this size so each request stays small (avoids proxy timeouts / dropped connections on one huge POST). */
 const CHUNK_THRESHOLD = CHUNK_SIZE;
 const CHUNK_TIMEOUT_MS = 300000; // 5 min per chunk
+
+/** Mirrors the server's poster naming for uploaded videos (`/uploads/thumb-<stem>.jpg`). */
+const posterPathFor = (url: string): string => {
+    const name = url.split("/").pop() || "";
+    return `/uploads/thumb-${name.replace(/\.[^.]+$/, "")}.jpg`;
+};
 
 export default function MediaUploadZone({ mediaUrls, onMediaChange, thumbnailUrl, onThumbnailChange, maxFiles = 10, format = "image" }: MediaUploadZoneProps) {
     const { success, error: toastError } = useToast();
@@ -62,7 +69,9 @@ export default function MediaUploadZone({ mediaUrls, onMediaChange, thumbnailUrl
                 xhr.addEventListener("error", () => reject(new Error("Network error")));
                 xhr.addEventListener("timeout", () => reject(new Error("Upload timed out")));
                 xhr.open("POST", "/api/upload-chunk");
+                xhr.withCredentials = true;
                 xhr.timeout = CHUNK_TIMEOUT_MS;
+                Object.entries(staffUploadHeaders()).forEach(([k, v]) => xhr.setRequestHeader(k, v));
                 xhr.send(formData);
             });
 
@@ -80,7 +89,8 @@ export default function MediaUploadZone({ mediaUrls, onMediaChange, thumbnailUrl
 
         const completeRes = await fetch("/api/upload-complete", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            headers: staffUploadHeaders({ "Content-Type": "application/json" }),
             body: JSON.stringify({ uploadId, totalChunks, originalFilename: file.name }),
         });
         if (!completeRes.ok) {
@@ -159,7 +169,9 @@ export default function MediaUploadZone({ mediaUrls, onMediaChange, thumbnailUrl
             });
 
             xhr.open("POST", "/api/upload");
+            xhr.withCredentials = true;
             xhr.timeout = 1800000;
+            Object.entries(staffUploadHeaders()).forEach(([k, v]) => xhr.setRequestHeader(k, v));
             xhr.send(formData);
         });
     }, [uploadChunked]);
@@ -183,6 +195,13 @@ export default function MediaUploadZone({ mediaUrls, onMediaChange, thumbnailUrl
 
         if (newUrls.length) {
             onMediaChange([...mediaUrls, ...newUrls]);
+            // The server derives a poster frame for every uploaded video at the
+            // deterministic path below; adopt it as the cover so video tiles and
+            // carousel previews never render an empty box.
+            if (!thumbnailUrl && onThumbnailChange) {
+                const firstVideo = newUrls.find((u) => shouldRenderAsVideo(u, format));
+                if (firstVideo) onThumbnailChange(posterPathFor(firstVideo));
+            }
         }
     }, [mediaUrls, maxFiles, onMediaChange, uploadFile]);
 
@@ -296,7 +315,7 @@ export default function MediaUploadZone({ mediaUrls, onMediaChange, thumbnailUrl
             const formData = new FormData();
             formData.append("file", file);
 
-            const uploadRes = await fetch("/api/upload", { method: "POST", body: formData });
+            const uploadRes = await fetch("/api/upload", { method: "POST", body: formData, credentials: "include", headers: staffUploadHeaders() });
             const { url: thumbUrl } = await uploadRes.json();
 
             if (onThumbnailChange) {
@@ -495,7 +514,7 @@ export default function MediaUploadZone({ mediaUrls, onMediaChange, thumbnailUrl
 
             {/* Thumbnail grid with drag reorder */}
             {mediaUrls.length > 0 && (
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                     {mediaUrls.map((url, idx) => (
                         <div
                             key={url + idx}
@@ -504,8 +523,7 @@ export default function MediaUploadZone({ mediaUrls, onMediaChange, thumbnailUrl
                             onDragOver={(e) => onThumbDragOver(e, idx)}
                             onDrop={(e) => onThumbDrop(e, idx)}
                             onDragEnd={onThumbDragEnd}
-                            className={`relative group aspect-square rounded-lg overflow-hidden bg-zinc-100 border-2 transition-all ${dragOverIdx === idx ? "border-indigo-400 scale-105 shadow-lg" : "border-zinc-200 hover:border-zinc-400"
-                                }`}
+                            className={`relative group ${tileAspectClass(format)} rounded-lg overflow-hidden bg-zinc-100 border-2 transition-all ${dragOverIdx === idx ? "border-indigo-400 scale-105 shadow-lg" : "border-zinc-200 hover:border-zinc-400"}`}
                         >
                             {/* Drag handle */}
                             <div className="absolute inset-0 z-10 cursor-grab active:cursor-grabbing" />

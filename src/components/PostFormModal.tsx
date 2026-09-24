@@ -1,13 +1,15 @@
-import { useState, useRef } from "react";
+import { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { X, Loader2 } from "lucide-react";
 import { Post, PostFormat, InternalStatus, ClientStatus } from "../types";
 import MediaUploadZone from "./MediaUploadZone";
 import { isVideo } from "../utils";
 
-const INTERNAL_STATUSES: InternalStatus[] = ["Concept", "Draft", "Internal QA", "Ready for Client", "Changes Requested", "Approved", "Scheduled", "Posted"];
+import { scheduledAtForStatusTransition } from "../agencyCalendar";
+
+const INTERNAL_STATUSES: InternalStatus[] = ["Concept", "Draft", "Internal QA", "Ready for Client", "Changes Requested", "Approved", "Ready to Schedule", "Scheduled", "Posted"];
 const CLIENT_STATUSES: ClientStatus[] = ["Not Ready for Client", "Needs Your Review", "Approved", "Changes Requested"];
-const FORMATS: PostFormat[] = ["image", "carousel", "reel"];
+const FORMATS: PostFormat[] = ["image", "carousel", "reel", "story"];
 const PILLARS = ["Product Launch", "Culture", "Thought Leadership", "Education", "UGC", "Promotional", "Community", "Event", "General"];
 
 type FormState = {
@@ -36,67 +38,38 @@ interface Props {
     post?: Post | null;
     onSubmit: (data: Partial<Post> & { id?: string }) => void;
     onClose: () => void;
+    pillarOptions?: string[];
+    campaignOptions?: { code: string; name: string }[];
+    initialDate?: string;
 }
 
-export default function PostFormModal({ post, onSubmit, onClose }: Props) {
+export default function PostFormModal({ post, onSubmit, onClose, pillarOptions, campaignOptions = [], initialDate }: Props) {
+    const pillars = (pillarOptions && pillarOptions.length > 0) ? pillarOptions : PILLARS;
     const [form, setForm] = useState<FormState>({
         title: post?.title ?? "",
         format: post?.format ?? "image",
         mediaUrls: post?.mediaUrls ?? [],
         caption: post?.caption ?? "",
         hashtags: post?.hashtags ?? [],
-        date: post?.date ?? new Date().toISOString().split("T")[0],
+        date: post?.date ?? initialDate ?? new Date().toISOString().split("T")[0],
         time: post?.time ?? "12:00 PM",
         clientStatus: post?.clientStatus ?? "Not Ready for Client",
         internalStatus: post?.internalStatus ?? "Draft",
         assignee: post?.assignee ?? "",
         campaignCode: post?.campaignCode ?? "",
         // If the existing contentPillar is not in the preset list, treat it as custom
-        contentPillar: PILLARS.includes(post?.contentPillar ?? "") || !post?.contentPillar ? (post?.contentPillar ?? "") : "__custom",
-        customPillar: PILLARS.includes(post?.contentPillar ?? "") ? "" : (post?.contentPillar ?? ""),
+        contentPillar: pillars.includes(post?.contentPillar ?? "") || !post?.contentPillar ? (post?.contentPillar ?? "") : "__custom",
+        customPillar: pillars.includes(post?.contentPillar ?? "") ? "" : (post?.contentPillar ?? ""),
         internalNotes: post?.internalNotes ?? "",
         assetLineage: post?.assetLineage ?? "",
         isBlocked: post?.isBlocked ?? false,
         blockedReason: post?.blockedReason ?? "",
         thumbnailUrl: post?.thumbnailUrl ?? "",
-        dueDate: post?.dueDate ?? "",
+        dueDate: post?.dueDate ? String(post.dueDate).slice(0, 10) : "",
     });
     const [tagInput, setTagInput] = useState("");
     const [saving, setSaving] = useState(false);
     const [errors, setErrors] = useState<Record<string, string>>({});
-    const videoRef = useRef<HTMLVideoElement>(null);
-    const [isCapturing, setIsCapturing] = useState(false);
-
-    const handleCaptureFrame = async () => {
-        const video = videoRef.current;
-        if (!video) return;
-
-        setIsCapturing(true);
-        try {
-            const canvas = document.createElement("canvas");
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            const ctx = canvas.getContext("2d");
-            if (!ctx) throw new Error("Canvas context error");
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-            const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.9));
-            if (!blob) throw new Error("Blob error");
-
-            const file = new File([blob], `frame-${Date.now()}.jpg`, { type: "image/jpeg" });
-            const formData = new FormData();
-            formData.append("file", file);
-
-            const res = await fetch("/api/upload", { method: "POST", body: formData });
-            const { url } = await res.json();
-
-            set("thumbnailUrl", url);
-        } catch (err) {
-            console.error("Frame capture error:", err);
-        } finally {
-            setIsCapturing(false);
-        }
-    };
 
     const set = (key: keyof FormState, value: any) => setForm((f) => ({ ...f, [key]: value }));
     const handleInternalStatusChange = (value: InternalStatus) => {
@@ -136,6 +109,21 @@ export default function PostFormModal({ post, onSubmit, onClose }: Props) {
 
     const handleSubmit = async () => {
         if (!validate()) return;
+        let scheduledAt: string | null | undefined;
+        try {
+            scheduledAt = scheduledAtForStatusTransition(
+                post?.internalStatus,
+                form.internalStatus,
+                form.date,
+                form.time,
+            );
+        } catch (error) {
+            setErrors((current) => ({
+                ...current,
+                schedule: error instanceof Error ? error.message : "Unable to schedule this post.",
+            }));
+            return;
+        }
         setSaving(true);
         try {
             // Resolve the actual content pillar value (custom text or preset)
@@ -149,6 +137,7 @@ export default function PostFormModal({ post, onSubmit, onClose }: Props) {
                 internalStatus: form.internalStatus,
                 thumbnailUrl: form.thumbnailUrl || post?.thumbnailUrl || undefined,
                 dueDate: form.dueDate || undefined,
+                scheduledAt,
             };
             onSubmit(payload);
             onClose();
@@ -170,6 +159,9 @@ export default function PostFormModal({ post, onSubmit, onClose }: Props) {
                 onClick={onClose}
             >
                 <motion.div
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="post-form-title"
                     initial={{ scale: 0.96, opacity: 0, y: 10 }}
                     animate={{ scale: 1, opacity: 1, y: 0 }}
                     exit={{ scale: 0.96, opacity: 0, y: 10 }}
@@ -180,10 +172,10 @@ export default function PostFormModal({ post, onSubmit, onClose }: Props) {
                     {/* Header */}
                     <div className="px-4 sm:px-6 py-3 sm:py-4 border-b border-zinc-200 flex items-center justify-between shrink-0">
                         <div>
-                            <h2 className="text-sm sm:text-base font-bold text-zinc-900">{post ? "Edit Post" : "Create New Post"}</h2>
+                            <h2 id="post-form-title" className="text-sm sm:text-base font-bold text-zinc-900">{post ? "Edit Post" : "Create New Post"}</h2>
                             <p className="text-xs text-zinc-400 mt-0.5 hidden sm:block">{post ? `Editing: ${post.title} ` : "Fill in the details below to publish a new post"}</p>
                         </div>
-                        <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 transition-colors">
+                        <button aria-label="Close post editor" onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 transition-colors">
                             <X className="w-5 h-5" />
                         </button>
                     </div>
@@ -191,7 +183,7 @@ export default function PostFormModal({ post, onSubmit, onClose }: Props) {
                     {/* Body — stacked on mobile, side-by-side on desktop */}
                     <div className="flex-1 overflow-hidden flex flex-col md:flex-row min-h-0">
                         {/* Media section */}
-                        <div className="w-full md:w-[38%] md:border-r border-b md:border-b-0 border-zinc-200 overflow-y-auto p-4 sm:p-5 space-y-4 bg-zinc-50/50 max-h-[40vh] md:max-h-none">
+                        <div className="w-full md:w-[38%] md:border-r border-b md:border-b-0 border-zinc-200 overflow-y-auto p-4 sm:p-5 space-y-4 bg-zinc-50/50 max-h-[50vh] md:max-h-none min-h-0">
                             <div>
                                 <label className={labelClass}>Media Files</label>
                                 {errors.media && <p className="text-xs text-red-600 mb-2">{errors.media}</p>}
@@ -206,7 +198,7 @@ export default function PostFormModal({ post, onSubmit, onClose }: Props) {
 
                             <div>
                                 <label className={labelClass}>Post Format</label>
-                                <div className="grid grid-cols-3 gap-1.5">
+                                <div className="grid grid-cols-4 gap-1.5">
                                     {FORMATS.map((f) => (
                                         <button
                                             key={f}
@@ -264,9 +256,9 @@ export default function PostFormModal({ post, onSubmit, onClose }: Props) {
                         <div className="flex-1 overflow-y-auto p-5 space-y-4 min-h-0">
                             {/* Title */}
                             <div>
-                                <label className={labelClass}>Post Title <span className="text-red-500">*</span></label>
+                                <label htmlFor="post-title" className={labelClass}>Post Title <span className="text-red-500">*</span></label>
                                 {errors.title && <p className="text-xs text-red-600 mb-1">{errors.title}</p>}
-                                <input type="text" value={form.title} onChange={(e) => set("title", e.target.value)}
+                                <input id="post-title" type="text" value={form.title} onChange={(e) => set("title", e.target.value)}
                                     placeholder="e.g. Spring Collection Launch"
                                     className={`${inputClass} ${errors.title ? "border-red-300 focus:ring-red-500" : ""} `} />
                             </div>
@@ -274,34 +266,35 @@ export default function PostFormModal({ post, onSubmit, onClose }: Props) {
                             {/* Date & Time */}
                             <div className="grid grid-cols-2 gap-3">
                                 <div>
-                                    <label className={labelClass}>Publish Date</label>
-                                    <input type="date" value={form.date} onChange={(e) => set("date", e.target.value)} className={inputClass} />
+                                    <label htmlFor="publish-date" className={labelClass}>Publish Date</label>
+                                    <input id="publish-date" type="date" value={form.date} onChange={(e) => set("date", e.target.value)} className={inputClass} />
                                 </div>
                                 <div>
-                                    <label className={labelClass}>Time</label>
-                                    <input type="text" value={form.time} onChange={(e) => set("time", e.target.value)}
+                                    <label htmlFor="publish-time" className={labelClass}>Time</label>
+                                    <input id="publish-time" type="text" value={form.time} onChange={(e) => set("time", e.target.value)}
                                         placeholder="09:00 AM" className={inputClass} />
                                 </div>
                             </div>
+                            {errors.schedule && <p role="alert" className="text-xs text-red-600 -mt-2">{errors.schedule}</p>}
 
                             {/* Feedback Due */}
                             <div>
-                                <label className={labelClass}>Feedback Due</label>
-                                <input type="date" value={form.dueDate} onChange={(e) => set("dueDate", e.target.value)} className={inputClass} />
+                                <label htmlFor="feedback-due" className={labelClass}>Feedback Due</label>
+                                <input id="feedback-due" type="date" value={form.dueDate ? form.dueDate.slice(0, 10) : ""} onChange={(e) => set("dueDate", e.target.value)} className={inputClass} />
                             </div>
 
                             {/* Statuses */}
                             <div className="grid grid-cols-2 gap-3">
                                 <div>
-                                    <label className={labelClass}>Internal Status</label>
-                                    <select value={form.internalStatus} onChange={(e) => handleInternalStatusChange(e.target.value as InternalStatus)}
+                                    <label htmlFor="internal-status" className={labelClass}>Internal Status</label>
+                                    <select id="internal-status" value={form.internalStatus} onChange={(e) => handleInternalStatusChange(e.target.value as InternalStatus)}
                                         className={`${inputClass} bg-white cursor-pointer`}>
                                         {INTERNAL_STATUSES.map((s) => <option key={s}>{s}</option>)}
                                     </select>
                                 </div>
                                 <div>
-                                    <label className={labelClass}>Client Status</label>
-                                    <select value={form.clientStatus} onChange={(e) => set("clientStatus", e.target.value as ClientStatus)}
+                                    <label htmlFor="client-status" className={labelClass}>Client Status</label>
+                                    <select id="client-status" value={form.clientStatus} onChange={(e) => set("clientStatus", e.target.value as ClientStatus)}
                                         className={`${inputClass} bg-white cursor-pointer`}>
                                         {CLIENT_STATUSES.map((s) => <option key={s}>{s}</option>)}
                                     </select>
@@ -311,24 +304,40 @@ export default function PostFormModal({ post, onSubmit, onClose }: Props) {
                             {/* Assignee / Campaign / Pillar */}
                             <div className="grid grid-cols-3 gap-3">
                                 <div>
-                                    <label className={labelClass}>Assignee</label>
-                                    <input type="text" value={form.assignee} onChange={(e) => set("assignee", e.target.value)}
+                                    <label htmlFor="assignee" className={labelClass}>Assignee</label>
+                                    <input id="assignee" type="text" value={form.assignee} onChange={(e) => set("assignee", e.target.value)}
                                         placeholder="Sarah J." className={inputClass} />
                                 </div>
                                 <div>
-                                    <label className={labelClass}>Campaign Code</label>
-                                    <input type="text" value={form.campaignCode} onChange={(e) => set("campaignCode", e.target.value)}
-                                        placeholder="SPR26-LCH" className={inputClass} />
+                                    <label htmlFor="campaign-code" className={labelClass}>Campaign Code</label>
+                                    {campaignOptions.length > 0 ? (
+                                        <select id="campaign-code"
+                                            value={form.campaignCode}
+                                            onChange={(e) => set("campaignCode", e.target.value)}
+                                            className={`${inputClass} bg-white cursor-pointer`}
+                                        >
+                                            <option value="">Select…</option>
+                                            {campaignOptions.map((c) => (
+                                                <option key={c.code} value={c.code}>{c.name} ({c.code})</option>
+                                            ))}
+                                            {form.campaignCode && !campaignOptions.some((c) => c.code === form.campaignCode) && (
+                                                <option value={form.campaignCode}>{form.campaignCode}</option>
+                                            )}
+                                        </select>
+                                    ) : (
+                                        <input id="campaign-code" type="text" value={form.campaignCode} onChange={(e) => set("campaignCode", e.target.value)}
+                                            placeholder="SPR26-LCH" className={inputClass} />
+                                    )}
                                 </div>
                                 <div>
-                                    <label className={labelClass}>Content Pillar</label>
-                                    <select
+                                    <label htmlFor="content-pillar" className={labelClass}>Content Pillar</label>
+                                    <select id="content-pillar"
                                         value={form.contentPillar}
                                         onChange={(e) => set("contentPillar", e.target.value)}
                                         className={`${inputClass} bg-white cursor-pointer`}
                                     >
                                         <option value="">Select…</option>
-                                        {PILLARS.map((p) => <option key={p}>{p}</option>)}
+                                        {pillars.map((p) => <option key={p}>{p}</option>)}
                                         <option value="__custom">Custom…</option>
                                     </select>
                                     {form.contentPillar === "__custom" && (
@@ -346,8 +355,8 @@ export default function PostFormModal({ post, onSubmit, onClose }: Props) {
 
                             {/* Caption */}
                             <div>
-                                <label className={labelClass}>Caption</label>
-                                <textarea value={form.caption} onChange={(e) => set("caption", e.target.value)}
+                                <label htmlFor="caption" className={labelClass}>Caption</label>
+                                <textarea id="caption" value={form.caption} onChange={(e) => set("caption", e.target.value)}
                                     placeholder="Write the post caption here…" rows={4}
                                     className={`${inputClass} resize-none`} />
                                 <p className={`text-[11px] mt-1 text-right font-medium ${form.caption.length > 2200 ? "text-red-500" :
@@ -357,7 +366,7 @@ export default function PostFormModal({ post, onSubmit, onClose }: Props) {
 
                             {/* Hashtags */}
                             <div>
-                                <label className={labelClass}>Hashtags</label>
+                                <label htmlFor="hashtag-input" className={labelClass}>Hashtags</label>
                                 <div className="flex flex-wrap gap-1.5 mb-2 min-h-[28px]">
                                     {form.hashtags.map((tag) => (
                                         <span key={tag} className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 border border-blue-100 rounded-full px-2.5 py-0.5 text-xs font-medium">
@@ -369,7 +378,7 @@ export default function PostFormModal({ post, onSubmit, onClose }: Props) {
                                     ))}
                                 </div>
                                 <div className="flex gap-2">
-                                    <input type="text" value={tagInput} onChange={(e) => setTagInput(e.target.value)}
+                                    <input id="hashtag-input" type="text" value={tagInput} onChange={(e) => setTagInput(e.target.value)}
                                         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); addTag(); } }}
                                         placeholder="Type a hashtag and press Enter" className={`${inputClass} flex-1`} />
                                     <button onClick={addTag} className="px-4 py-2.5 bg-zinc-100 hover:bg-zinc-200 rounded-lg text-sm font-semibold text-zinc-700 transition-colors whitespace-nowrap">+ Add</button>
@@ -378,16 +387,16 @@ export default function PostFormModal({ post, onSubmit, onClose }: Props) {
 
                             {/* Internal Notes */}
                             <div>
-                                <label className={labelClass}>Internal Notes</label>
-                                <textarea value={form.internalNotes} onChange={(e) => set("internalNotes", e.target.value)}
+                                <label htmlFor="internal-notes" className={labelClass}>Internal Notes</label>
+                                <textarea id="internal-notes" value={form.internalNotes} onChange={(e) => set("internalNotes", e.target.value)}
                                     placeholder="Agency-only notes about this post…" rows={3}
                                     className={`${inputClass} resize-none bg-amber-50/60 border-amber-200 focus:ring-amber-500`} />
                             </div>
 
                             {/* Asset Lineage */}
                             <div>
-                                <label className={labelClass}>Asset Lineage</label>
-                                <input type="text" value={form.assetLineage} onChange={(e) => set("assetLineage", e.target.value)}
+                                <label htmlFor="asset-lineage" className={labelClass}>Asset Lineage</label>
+                                <input id="asset-lineage" type="text" value={form.assetLineage} onChange={(e) => set("assetLineage", e.target.value)}
                                     placeholder="e.g. Final color grade from v3 folder. Do not use v2." className={inputClass} />
                             </div>
 
