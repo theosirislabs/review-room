@@ -6,6 +6,35 @@
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 }
 
+:root {
+  --rr-canvas: #f8fafc;
+  --rr-surface: #ffffff;
+  --rr-surface-muted: #f1f5f9;
+  --rr-text-primary: #0f172a;
+  --rr-text-secondary: #475569;
+  --rr-text-muted: #64748b;
+  --rr-border: #dbe3ec;
+  --rr-primary: #2563eb;
+  --rr-primary-hover: #1d4ed8;
+  --rr-success: #059669;
+  --rr-warning: #b45309;
+  --rr-danger: #dc2626;
+  --rr-radius-control: 0.5rem;
+  --rr-radius-panel: 0.75rem;
+}
+
+[data-theme="dark"] {
+  --rr-canvas: #0b1120;
+  --rr-surface: #111827;
+  --rr-surface-muted: #1e293b;
+  --rr-text-primary: #f8fafc;
+  --rr-text-secondary: #cbd5e1;
+  --rr-text-muted: #94a3b8;
+  --rr-border: #334155;
+  --rr-primary: #60a5fa;
+  --rr-primary-hover: #93c5fd;
+}
+
 /* ── Global base ────────────────────────────────────────────── */
 html {
   scroll-behavior: smooth;
@@ -401,4 +430,15 @@ select {
   body:has(.rr-client) { scrollbar-width: none; }
   html:has(.rr-client)::-webkit-scrollbar,
   body:has(.rr-client)::-webkit-scrollbar { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

@@ -1642,7 +1642,7 @@ export default function InternalView({
         tenant={currentTenant ? { id: String(currentTenant.id), name: String(currentTenant.name || currentTenant.id) } : null}
         adminToken={adminToken}
         currentUser={currentUser}
-        includeAgencyLink
+        includeAgencyLink={!!currentUser && ["super-admin", "graphic-designer", "marketing-team"].includes(currentUser.role)}
       />
 
       {/* Tenant Manager */}

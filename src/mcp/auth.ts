@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "crypto";
 import type Database from "better-sqlite3";
+import { listAllowedTenantIds } from "../security/authorization.js";
 
 export const MCP_TOKEN_PREFIX = "rr_mcp_";
 const LAST_USED_MIN_MS = 60_000;
@@ -10,6 +11,7 @@ export type McpActor = {
   userId: string;
   username: string;
   role: string;
+  tenantIds: string[];
   tokenName: string;
   expiresAt: string | null;
 };
@@ -36,13 +38,20 @@ export function authenticateMcp(db: Database.Database, req: { headers?: Record<s
   if (!token || !token.startsWith(MCP_TOKEN_PREFIX)) return null;
   const tokenHash = hashMcpToken(token);
   const match = db.prepare(`
-    SELECT t.id, t.userId, t.name, t.tokenHash, t.role, t.expiresAt, t.revoked, u.username
+    SELECT t.id, t.userId, t.name, t.tokenHash, t.role, t.expiresAt, t.revoked, u.username, u.role AS userRole
     FROM mcp_tokens t
     LEFT JOIN agency_users u ON u.id = t.userId
     WHERE t.tokenHash = ? AND t.revoked = 0
   `).get(tokenHash) as any;
-  if (!match) return null;
+  if (!match || !match.username || !match.userRole) return null;
   if (match.expiresAt && String(match.expiresAt) < new Date().toISOString()) return null;
+  const validRoles = new Set(["super-admin", "graphic-designer", "marketing-team", "reviewer", "user"]);
+  const roleRank: Record<string, number> = { user: 0, reviewer: 1, "marketing-team": 2, "graphic-designer": 3, "super-admin": 4 };
+  const tokenRole = String(match.role || "");
+  const currentRole = String(match.userRole || "");
+  const role = validRoles.has(tokenRole) && validRoles.has(currentRole)
+    ? (roleRank[tokenRole] <= roleRank[currentRole] ? tokenRole : currentRole)
+    : "user";
   const now = Date.now();
   const prev = lastUsedWrite.get(match.id) || 0;
   if (now - prev > LAST_USED_MIN_MS) {
@@ -54,8 +63,9 @@ export function authenticateMcp(db: Database.Database, req: { headers?: Record<s
   return {
     tokenId: match.id,
     userId: match.userId,
-    username: match.username || "unknown",
-    role: match.role,
+    username: match.username,
+    role,
+    tenantIds: listAllowedTenantIds(db, match.userId, role),
     tokenName: match.name,
     expiresAt: match.expiresAt || null,
   };

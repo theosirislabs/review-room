@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { motion } from "motion/react";
-import { Copy, Link2, Loader2, ShieldCheck, X } from "lucide-react";
+import { Copy, Link2, Loader2, ShieldCheck } from "lucide-react";
+import Dialog from "./ui/Dialog";
 import { useToast } from "./Toast";
 import {
   normalizeReviewerName,
@@ -87,19 +87,6 @@ export default function ShareClientLinkModal({
     };
   }, [adminToken, currentUser?.id, isOpen, tenant?.id]);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    const focusTimer = window.setTimeout(() => inputRef.current?.focus(), 0);
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-      window.clearTimeout(focusTimer);
-    };
-  }, [isOpen, onClose]);
-
   if (!isOpen || !tenant) return null;
 
   const copyLink = async (type: "client" | "agency") => {
@@ -136,30 +123,14 @@ export default function ShareClientLinkModal({
   };
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <motion.div
-        initial={{ scale: 0.95, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        className="bg-white rounded-2xl p-6 w-full max-w-lg shadow-2xl space-y-5"
-        onClick={(event) => event.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={`${fieldId}-title`}
-        aria-describedby={`${fieldId}-description`}
-      >
-        <div className="flex items-start justify-between gap-4 border-b pb-4">
-          <div>
-            <h2 id={`${fieldId}-title`} className="text-xl font-bold text-zinc-900">Share client review</h2>
-            <p id={`${fieldId}-description`} className="text-xs text-zinc-500 mt-1">
-              Give {tenant.name} a named review link. The name stays in the link fragment and is not stored by the server.
-            </p>
-          </div>
-          <button type="button" onClick={onClose} className="p-2 text-zinc-400 hover:text-zinc-900 transition-colors" aria-label="Close share dialog">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        <div className="space-y-4">
+    <Dialog
+      isOpen={isOpen}
+      onClose={onClose}
+      title="Share client review"
+      description={`Give ${tenant.name} a named review link. The name stays in the link fragment and is not stored by the server.`}
+      size="md"
+    >
+      <div className="space-y-4">
           <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 space-y-3">
             <label htmlFor={fieldId} className="block text-[10px] font-bold uppercase tracking-widest text-zinc-500">
               Reviewer's name <span className="text-emerald-600">required</span>
@@ -222,8 +193,8 @@ export default function ShareClientLinkModal({
           </div>
 
           {includeAgencyLink && (
-            <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-4 space-y-3">
-              <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-indigo-700">
+            <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 space-y-3">
+              <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-blue-700">
                 <ShieldCheck className="w-3.5 h-3.5" /> Agency access link
               </div>
               <div className="flex gap-2">
@@ -231,14 +202,14 @@ export default function ShareClientLinkModal({
                   readOnly
                   value={loading ? "Loading secure link…" : links?.agencyUrl || "Agency link unavailable"}
                   aria-label="Agency access link"
-                  className="min-w-0 flex-1 bg-white border border-indigo-200 rounded-lg px-3 py-2 text-xs font-mono text-indigo-700 truncate"
+                  className="min-w-0 flex-1 bg-white border border-blue-200 rounded-lg px-3 py-2 text-xs font-mono text-blue-700 truncate"
                 />
                 <button
                   type="button"
                   onClick={() => void copyLink("agency")}
                   disabled={loading || copying !== null || !links?.agencyUrl}
                   aria-label="Copy agency access link"
-                  className="p-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40 transition-colors active:scale-95"
+                  className="p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40 transition-colors active:scale-95"
                 >
                   {copying === "agency" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Copy className="w-4 h-4" />}
                 </button>
@@ -249,8 +220,7 @@ export default function ShareClientLinkModal({
           <p className="text-[11px] text-zinc-500 leading-relaxed border border-zinc-100 rounded-xl p-3 bg-zinc-50/80">
             <span className="font-bold text-zinc-700">Single post?</span> Open a post in the client view and use its share button. The reviewer name is carried there too.
           </p>
-        </div>
-      </motion.div>
-    </div>
+      </div>
+    </Dialog>
   );
 }

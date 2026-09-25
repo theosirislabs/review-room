@@ -31,7 +31,7 @@ function hostOk(req: Request): boolean {
   ].join(",");
   const hosts = raw.split(",").map((h) => h.trim().toLowerCase()).filter(Boolean);
   if (hosts.length === 0) return true;
-  return hosts.some((h) => ALLOWED_HOSTS.has(h) || h.startsWith("localhost") || h.startsWith("127.0.0.1"));
+  return hosts.some((h) => ALLOWED_HOSTS.has(h) || /^localhost:\d{1,5}$/.test(h) || /^127\.0\.0\.1:\d{1,5}$/.test(h));
 }
 
 function setCors(res: Response) {

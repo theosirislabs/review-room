@@ -14,7 +14,7 @@ import { createServer as createViteServer } from "vite";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import Database from "better-sqlite3";
-import { randomUUID, scryptSync, timingSafeEqual } from "crypto";
+import { createHash, randomUUID, scryptSync, timingSafeEqual } from "crypto";
 import { mkdirSync, existsSync, unlinkSync, createReadStream, createWriteStream, rmSync, renameSync, statSync, openSync, readSync, closeSync } from "fs";
 import { spawn } from "child_process";
 import { Readable, Transform } from "stream";
@@ -25,6 +25,18 @@ import { mountReviewRoomMcp } from "./src/mcp/mount.js";
 import { generateMcpToken } from "./src/mcp/auth.js";
 import { mountProductionStaticAssets } from "./src/staticDelivery.js";
 import { getOperationalAnalytics } from "./src/analyticsUtils.js";
+import {
+  applyTenantMembershipsMigration,
+  canAccessTenant,
+  canPerformTenantAction,
+  getTenantMemberships,
+  listAllowedTenantIds,
+  setTenantMemberships,
+} from "./src/security/authorization.js";
+import { validateShareActor, type ActiveShareRecord, type ShareActor } from "./src/security/socketAuthorization.js";
+import { ensureShareTokenStorage, hashShareToken } from "./src/security/shareTokens.js";
+import { fetchExternalMedia, MAX_EXTERNAL_MEDIA_BYTES } from "./src/security/mediaUrl.js";
+import { validateCommentMutation, validatePostMutation, MAX_BULK_POSTS } from "./src/security/validation.js";
 
 // ── Data directories ──────────────────────────────────────────
 const DATA_DIR = path.join(process.cwd(), "data");
@@ -133,6 +145,15 @@ db.exec(`
     role TEXT NOT NULL DEFAULT 'graphic-designer',
     createdAt TEXT
   );
+
+  CREATE TABLE IF NOT EXISTS agency_sessions (
+    tokenHash TEXT PRIMARY KEY,
+    userId TEXT NOT NULL,
+    createdAt TEXT NOT NULL,
+    expiresAt INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_agency_sessions_user ON agency_sessions(userId);
+  CREATE INDEX IF NOT EXISTS idx_agency_sessions_expiry ON agency_sessions(expiresAt);
 `);
 
 // ── Migrations ────────────────────────────────────────────────
@@ -181,13 +202,15 @@ try {
         id TEXT PRIMARY KEY,
         tenantId TEXT NOT NULL,
         postId TEXT NOT NULL,
-        token TEXT NOT NULL UNIQUE,
+        token TEXT,
+        tokenHash TEXT NOT NULL UNIQUE,
         createdAt TEXT NOT NULL,
         expiresAt TEXT,
         revoked INTEGER NOT NULL DEFAULT 0
       );
-      CREATE INDEX idx_post_client_shares_token ON post_client_shares(token);
+      CREATE INDEX idx_post_client_shares_tokenHash ON post_client_shares(tokenHash);
       CREATE INDEX idx_post_client_shares_post ON post_client_shares(postId);
+      CREATE INDEX idx_post_client_shares_tenant ON post_client_shares(tenantId);
     `);
   }
 }
@@ -203,12 +226,13 @@ try {
         id TEXT PRIMARY KEY,
         tenantId TEXT NOT NULL,
         name TEXT,
-        token TEXT NOT NULL UNIQUE,
+        token TEXT,
+        tokenHash TEXT NOT NULL UNIQUE,
         createdAt TEXT NOT NULL,
         expiresAt TEXT,
         revoked INTEGER DEFAULT 0
       );
-      CREATE INDEX idx_share_sets_token ON share_sets(token);
+      CREATE INDEX idx_share_sets_tokenHash ON share_sets(tokenHash);
       CREATE INDEX idx_share_sets_tenant ON share_sets(tenantId);
       CREATE TABLE share_set_posts (
         shareSetId TEXT NOT NULL,
@@ -280,6 +304,9 @@ if (tenantCount.count === 0) {
   insertTenant.run("osiris", "Osiris Labs", "https://picsum.photos/seed/osiris/200/200", "Artificial Intelligence & Creative Studio.", JSON.stringify({ theme: "dark" }));
   insertTenant.run("fahmy", "Fahmy Properties", "https://picsum.photos/seed/fahmy/200/200", "Premium real estate development in Egypt — luxury residential & commercial properties.", JSON.stringify({ theme: "default" }));
 }
+
+applyTenantMembershipsMigration(db);
+ensureShareTokenStorage(db);
 
 // ── Password hashing ───────────────────────────────────────────
 const hashPassword = (password: string) => scryptSync(password, "osiris-salt-v1", 64).toString("hex");
@@ -395,16 +422,24 @@ const upload = multer({
 const CHUNK_MULTER_LIMIT = 30 * 1024 * 1024;
 const chunkStorage = multer.diskStorage({
   destination: (req, _file, cb) => {
-        const rawUploadId = (req.body?.uploadId as string) || "unknown";
-    // Sanitize: only allow safe characters to prevent path traversal
-    const uploadId = rawUploadId.replace(/[^a-zA-Z0-9_-]/g, "_");
-    const dir = path.join(CHUNKS_DIR, uploadId);
+    const rawUploadId = String(req.body?.uploadId || "");
+    const ownerKey = uploadOwnerKey(req);
+    if (!/^[a-zA-Z0-9_-]{1,128}$/.test(rawUploadId) || !ownerKey) {
+      cb(new Error("Invalid upload session"), "");
+      return;
+    }
+    const dir = path.join(CHUNKS_DIR, ownerKey, rawUploadId);
     mkdirSync(dir, { recursive: true });
     cb(null, dir);
   },
   filename: (req, _file, cb) => {
-    const idx = (req.body?.chunkIndex as string) ?? "0";
-    cb(null, `chunk-${idx.padStart(5, "0")}`);
+    const rawIndex = String(req.body?.chunkIndex ?? "");
+    const index = Number(rawIndex);
+    if (!/^\d+$/.test(rawIndex) || !Number.isInteger(index) || index < 0 || index >= MAX_UPLOAD_CHUNKS) {
+      cb(new Error("Invalid chunk index"), "");
+      return;
+    }
+    cb(null, `chunk-${String(index).padStart(5, "0")}`);
   },
 });
 const uploadChunk = multer({
@@ -732,9 +767,9 @@ function getPostStripForShare(tenantId: string, postId: string) {
 function getActiveShareTokensForPost(postId: string): string[] {
   const now = new Date().toISOString();
   const rows = db.prepare(
-    "SELECT token FROM post_client_shares WHERE postId = ? AND revoked = 0 AND (expiresAt IS NULL OR expiresAt > ?)"
-  ).all(postId, now) as { token: string }[];
-  return rows.map((r) => r.token);
+    "SELECT tokenHash FROM post_client_shares WHERE postId = ? AND revoked = 0 AND (expiresAt IS NULL OR expiresAt > ?)"
+  ).all(postId, now) as { tokenHash: string }[];
+  return rows.map((r) => r.tokenHash);
 }
 
 function emitToPostShareRooms(io: Server, postId: string, event: string, payload: any) {
@@ -744,12 +779,13 @@ function emitToPostShareRooms(io: Server, postId: string, event: string, payload
 }
 
 function emitToShareSetRooms(io: Server, postId: string, event: string, payload: any) {
+  const now = new Date().toISOString();
   const rows = db.prepare(`
-    SELECT s.token FROM share_sets s
+    SELECT s.tokenHash FROM share_sets s
     JOIN share_set_posts p ON p.shareSetId = s.id
-    WHERE p.postId = ? AND s.revoked = 0
-  `).all(postId) as { token: string }[];
-  for (const r of rows) io.to(`share-set:${r.token}`).emit(event, payload);
+    WHERE p.postId = ? AND s.revoked = 0 AND (s.expiresAt IS NULL OR s.expiresAt > ?)
+  `).all(postId, now) as { tokenHash: string }[];
+  for (const r of rows) io.to(`share-set:${r.tokenHash}`).emit(event, payload);
 }
 
 const deriveClientStatus = (
@@ -805,32 +841,6 @@ const deleteAssetByUrl = (url: string) => {
   }
 };
 
-const MAX_IMPORT_URL_BYTES = 1024 * 1024 * 1024; // 1GB
-
-/** Turn Google Drive / Dropbox share links into direct-download URLs where possible */
-function normalizeExternalMediaUrl(raw: string): string {
-  const u = raw.trim();
-  try {
-    const parsed = new URL(u);
-    const host = parsed.hostname.toLowerCase();
-    const driveFile = u.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
-    if (driveFile) {
-      return `https://drive.google.com/uc?export=download&id=${driveFile[1]}`;
-    }
-    if (host.includes("drive.google.com")) {
-      const id = parsed.searchParams.get("id");
-      if (id) return `https://drive.google.com/uc?export=download&id=${id}`;
-    }
-    if (host.includes("dropbox.com")) {
-      parsed.searchParams.set("dl", "1");
-      return parsed.toString();
-    }
-    return u;
-  } catch {
-    return u;
-  }
-}
-
 function extFromContentType(ct: string): string | null {
   const m = (ct || "").split(";")[0].trim().toLowerCase();
   const map: Record<string, string> = {
@@ -865,10 +875,20 @@ type SocketActorKind = "staff" | "magic-internal" | "client" | "share" | "share-
 type SocketActor = {
   kind: SocketActorKind;
   tenantId: string;
+  userId?: string;
+  username?: string;
+  sessionToken?: string;
   role?: AgencyRole;
   postIds?: string[];
+  shareToken?: string;
 };
 const CLIENT_SAFE_EVENTS = new Set(["update-post", "add-comment"]);
+const TENANT_SOCKET_EVENTS = new Set([
+  "create-post", "create-posts-bulk", "update-post", "delete-post",
+  "add-comment", "delete-comment", "add-task", "delete-task", "toggle-task",
+  "create-campaign", "update-campaign", "delete-campaign",
+  "create-pillar", "delete-pillar",
+]);
 const actorIsClientLike = (a: SocketActor) => a.kind === "client" || a.kind === "share" || a.kind === "share-set";
 const actorIsAgency = (a: SocketActor) => a.kind === "staff" || a.kind === "magic-internal";
 const actorCanCreate = (a: SocketActor) =>
@@ -885,10 +905,11 @@ const actorAllowsPost = (a: SocketActor, postId?: string) => {
 };
 interface Session { userId: string; username: string; role: AgencyRole; expiresAt: number; }
 const sessions = new Map<string, Session>();
-const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const oidcStates = new Map<string, number>();
 
 const normalizeUsername = (email: string) => email.trim().toLowerCase();
+const sessionTokenHash = (token: string) => createHash("sha256").update(token).digest("hex");
 
 const publicOrigin = (req: express.Request) => {
   const env = (process.env.PUBLIC_URL || "").trim();
@@ -904,14 +925,179 @@ const oidcRedirectUri = (req: express.Request) => {
   return `${publicOrigin(req)}/api/auth/oidc/callback`;
 };
 
-const getToken = (req: any) => req.cookies?.osiris_session || (req.headers.authorization || "").replace("Bearer ", "");
+const getToken = (req: any) => {
+  const cookieToken = req.cookies?.osiris_session;
+  if (cookieToken) return String(cookieToken);
+  const authorization = String(req.headers?.authorization || "");
+  const match = /^Bearer\s+(\S+)/i.exec(authorization);
+  return match?.[1] || "";
+};
+const deleteSession = (token: string): void => {
+  const key = sessionTokenHash(token);
+  sessions.delete(key);
+  db.prepare("DELETE FROM agency_sessions WHERE tokenHash = ?").run(key);
+};
+const revokeUserSessions = (userId: string): void => {
+  db.prepare("DELETE FROM agency_sessions WHERE userId = ?").run(userId);
+  for (const [key, session] of sessions) {
+    if (session.userId === userId) sessions.delete(key);
+  }
+};
 const getSession = (token: string): Session | null => {
-  const s = sessions.get(token);
-  if (!s || s.expiresAt < Date.now()) {
-    if (s) sessions.delete(token);
+  if (!token) return null;
+  const key = sessionTokenHash(token);
+  let session = sessions.get(key);
+  if (!session) {
+    const row = db.prepare("SELECT userId, expiresAt FROM agency_sessions WHERE tokenHash = ?").get(key) as { userId: string; expiresAt: number } | undefined;
+    if (row) session = { userId: row.userId, username: "", role: "user", expiresAt: row.expiresAt };
+  }
+  if (!session || session.expiresAt < Date.now()) {
+    if (session) deleteSession(token);
     return null;
   }
-  return s;
+  const user = db.prepare("SELECT id, username, role FROM agency_users WHERE id = ?").get(session.userId) as
+    | { id: string; username: string; role: string }
+    | undefined;
+  if (!user) {
+    deleteSession(token);
+    return null;
+  }
+  const refreshed: Session = {
+    userId: user.id,
+    username: user.username,
+    role: user.role as AgencyRole,
+    expiresAt: session.expiresAt,
+  };
+  sessions.set(key, refreshed);
+  return refreshed;
+};
+
+const getSocketSession = (socket: any): Session | null => {
+  const token = typeof socket?.sessionToken === "string" ? socket.sessionToken : "";
+  return token ? getSession(token) : null;
+};
+
+const refreshSocketStaffActor = (socket: any): SocketActor | null => {
+  const actor = socket?.actor as SocketActor | undefined;
+  if (!actor || actor.kind !== "staff") return actor || null;
+  const session = getSocketSession(socket);
+  if (!session || !canAccessTenant(db, session.userId, session.role, actor.tenantId)) {
+    socket.disconnect(true);
+    return null;
+  }
+  actor.userId = session.userId;
+  actor.username = session.username;
+  actor.role = session.role;
+  return actor;
+};
+
+const getActiveShareRecord = (actor: SocketActor): ActiveShareRecord | null => {
+  const now = new Date().toISOString();
+  if (actor.kind === "share" && actor.shareToken) {
+    const row = db.prepare(`
+      SELECT s.tokenHash, s.tenantId, s.postId, s.expiresAt, s.revoked
+      FROM post_client_shares s
+      JOIN posts p ON p.id = s.postId AND p.tenantId = s.tenantId
+      WHERE s.tokenHash = ? AND s.revoked = 0 AND (s.expiresAt IS NULL OR s.expiresAt > ?)
+    `).get(actor.shareToken, now) as { tokenHash: string; tenantId: string; postId: string; expiresAt: string | null; revoked: number } | undefined;
+    return row ? { token: row.tokenHash, tenantId: row.tenantId, postIds: [row.postId], expiresAt: row.expiresAt, revoked: !!row.revoked } : null;
+  }
+  if (actor.kind === "share-set" && actor.shareToken) {
+    const set = db.prepare(`
+      SELECT id, tokenHash, tenantId, expiresAt, revoked
+      FROM share_sets
+      WHERE tokenHash = ? AND revoked = 0 AND (expiresAt IS NULL OR expiresAt > ?)
+    `).get(actor.shareToken, now) as { id: string; tokenHash: string; tenantId: string; expiresAt: string | null; revoked: number } | undefined;
+    if (!set) return null;
+    const rows = db.prepare(`
+      SELECT p.postId
+      FROM share_set_posts p
+      JOIN posts post ON post.id = p.postId AND post.tenantId = ?
+      WHERE p.shareSetId = ?
+    `).all(set.tenantId, set.id) as { postId: string }[];
+    return {
+      token: set.tokenHash,
+      tenantId: set.tenantId,
+      postIds: rows.map((row) => row.postId),
+      expiresAt: set.expiresAt,
+      revoked: !!set.revoked,
+    };
+  }
+  return null;
+};
+
+const revalidateSocketShareActor = (socket: any, actor: SocketActor, requestedPostId?: string): boolean => {
+  if (actor.kind !== "share" && actor.kind !== "share-set") return true;
+  const shareActor: ShareActor = {
+    kind: actor.kind,
+    tenantId: actor.tenantId,
+    postIds: actor.postIds || [],
+    shareToken: actor.shareToken || "",
+  };
+  const validation = validateShareActor(shareActor, getActiveShareRecord(actor), requestedPostId);
+  if (validation.valid) return true;
+  socket.emit("error", "This review link is no longer active.");
+  socket.disconnect(true);
+  return false;
+};
+
+const rejectSocketEvent = (socket: any, next: (error: Error) => void, message: string, disconnect = false) => {
+  socket.emit("error", message);
+  if (disconnect) socket.disconnect(true);
+  next(new Error("Unauthorized"));
+};
+
+const disconnectShareSockets = (io: Server, token: string, kind?: "share" | "share-set") => {
+  for (const socket of io.sockets.sockets.values()) {
+    const actor = (socket as any).actor as SocketActor | undefined;
+    if (actor?.shareToken === token && (!kind || actor.kind === kind)) socket.disconnect(true);
+  }
+};
+
+const revokeShareSetsForPost = (postId: string): string[] => {
+  const rows = db.prepare(`
+    SELECT DISTINCT s.id, s.tokenHash
+    FROM share_sets s
+    JOIN share_set_posts p ON p.shareSetId = s.id
+    WHERE p.postId = ?
+  `).all(postId) as { id: string; tokenHash: string }[];
+  const revoke = db.transaction(() => {
+    const update = db.prepare("UPDATE share_sets SET revoked = 1 WHERE id = ?");
+    for (const row of rows) update.run(row.id);
+  });
+  revoke();
+  return rows.map((row) => row.tokenHash);
+};
+
+const revokeTenantShareRecords = (tenantId: string): { postTokens: string[]; setTokens: string[] } => {
+  const postRows = db.prepare("SELECT tokenHash FROM post_client_shares WHERE tenantId = ? AND revoked = 0").all(tenantId) as { tokenHash: string }[];
+  const setRows = db.prepare("SELECT tokenHash FROM share_sets WHERE tenantId = ? AND revoked = 0").all(tenantId) as { tokenHash: string }[];
+  db.prepare("UPDATE post_client_shares SET revoked = 1 WHERE tenantId = ?").run(tenantId);
+  db.prepare("UPDATE share_sets SET revoked = 1 WHERE tenantId = ?").run(tenantId);
+  return { postTokens: postRows.map((row) => row.tokenHash), setTokens: setRows.map((row) => row.tokenHash) };
+};
+
+const disconnectUserSockets = (io: Server, userId: string) => {
+  for (const socket of io.sockets.sockets.values()) {
+    const actor = (socket as any).actor as SocketActor | undefined;
+    if (actor?.kind === "staff" && actor.userId === userId) socket.disconnect(true);
+  }
+};
+
+const disconnectTenantSockets = (io: Server, tenantId: string) => {
+  for (const socket of io.sockets.sockets.values()) {
+    const actor = (socket as any).actor as SocketActor | undefined;
+    if (actor?.tenantId === tenantId) socket.disconnect(true);
+  }
+};
+
+const disconnectTokenSockets = (io: Server, tenantId: string, kind: "client" | "internal") => {
+  for (const socket of io.sockets.sockets.values()) {
+    const actor = (socket as any).actor as SocketActor | undefined;
+    if (actor?.tenantId !== tenantId) continue;
+    if (kind === "client" && actor.kind === "client") socket.disconnect(true);
+    if (kind === "internal" && actor.kind === "magic-internal") socket.disconnect(true);
+  }
 };
 
 const requireAuth = (req: any, res: any): { user: Session } | null => {
@@ -935,14 +1121,44 @@ const requireRole = (req: any, res: any, allowedRoles: AgencyRole[]): { user: Se
 const requireSuperAdmin = (req: any, res: any): { user: Session } | null =>
   requireRole(req, res, ["super-admin"]);
 
-/**
- * Validates that the request has either:
- * 1. A valid Agency Session (any role)
- * 2. A valid Tenant Token (Client)
- */
+const tenantAuthSettings = (raw: any): any => {
+  if (typeof raw !== "string") return raw || {};
+  try { return JSON.parse(raw || "{}"); } catch { return {}; }
+};
+
+const allowedTenantIdsForSession = (session: Session): string[] =>
+  listAllowedTenantIds(db, session.userId, session.role);
+
+const requireTenantQueryAccess = (req: any, res: any, tenantId: string, action: "read" | "write" = "read") => {
+  const auth = requireAuth(req, res);
+  if (!auth) return null;
+  if (!canPerformTenantAction(db, auth.user.userId, auth.user.role, tenantId, action)) {
+    res.status(403).json({ error: "Forbidden: You do not have access to this tenant" });
+    return null;
+  }
+  return auth;
+};
+
+const requireTenantRole = (req: any, res: any, tenantId: string, allowedRoles: AgencyRole[]) => {
+  const auth = requireRole(req, res, allowedRoles);
+  if (!auth) return null;
+  if (!canAccessTenant(db, auth.user.userId, auth.user.role, tenantId)) {
+    res.status(403).json({ error: "Forbidden: You do not have access to this tenant" });
+    return null;
+  }
+  return auth;
+};
+
 const requireTenantAuth = (req: any, res: any, tenantId: string): boolean => {
-  if (getSession(getToken(req))) return true;
-  const passedToken = req.headers["x-tenant-token"] || req.query.token;
+  const session = getSession(getToken(req));
+  if (session) {
+    if (!canAccessTenant(db, session.userId, session.role, tenantId)) {
+      res.status(403).json({ error: "Forbidden: You do not have access to this tenant" });
+      return false;
+    }
+    return true;
+  }
+  const passedToken = String(req.headers["x-tenant-token"] || req.query.token || "");
   if (!passedToken) {
     res.status(401).json({ error: "Unauthorized: Missing access token" });
     return false;
@@ -952,36 +1168,41 @@ const requireTenantAuth = (req: any, res: any, tenantId: string): boolean => {
     res.status(404).json({ error: "Tenant not found" });
     return false;
   }
-  const settings = JSON.parse(tenant.settings || "{}");
+  const settings = tenantAuthSettings(tenant.settings);
   if (passedToken === settings.clientToken || passedToken === settings.internalToken) return true;
   res.status(403).json({ error: "Forbidden: Invalid token for this tenant" });
   return false;
 };
 
 const staffInternalTokenOk = (req: any, res: any, tenantId: string): boolean => {
-  const passedToken = req.headers["x-tenant-token"] || req.query.token;
+  const passedToken = String(req.headers["x-tenant-token"] || req.query.token || "");
   const tenant = db.prepare("SELECT settings FROM tenants WHERE id = ?").get(tenantId) as any;
   if (!tenant) {
     res.status(404).json({ error: "Tenant not found" });
     return false;
   }
-  const settings = JSON.parse(tenant.settings || "{}");
-  if (passedToken === settings.internalToken) return true;
+  const settings = tenantAuthSettings(tenant.settings);
+  if (passedToken && passedToken === settings.internalToken) return true;
   res.status(403).json({ error: "Forbidden: Agency login or internal workspace token required" });
   return false;
 };
 
-/** Agency session or tenant internal token (not client token). Reads may include role=user. */
 const requireAgencyOrInternalStaff = (req: any, res: any, tenantId: string): boolean => {
-  if (getSession(getToken(req))) return true;
+  const session = getSession(getToken(req));
+  if (session) {
+    if (!canAccessTenant(db, session.userId, session.role, tenantId)) {
+      res.status(403).json({ error: "Forbidden: You do not have access to this tenant" });
+      return false;
+    }
+    return true;
+  }
   return staffInternalTokenOk(req, res, tenantId);
 };
 
-/** Writes: agency role !== user, or magic internal token. */
 const requireAgencyMutator = (req: any, res: any, tenantId: string): boolean => {
-  const s = getSession(getToken(req));
-  if (s) {
-    if (s.role === "user") {
+  const session = getSession(getToken(req));
+  if (session) {
+    if (!canPerformTenantAction(db, session.userId, session.role, tenantId, "mutate")) {
       res.status(403).json({ error: "Forbidden: Insufficient permissions" });
       return false;
     }
@@ -990,11 +1211,10 @@ const requireAgencyMutator = (req: any, res: any, tenantId: string): boolean => 
   return staffInternalTokenOk(req, res, tenantId);
 };
 
-/** Post create/delete: super-admin, graphic-designer, or magic internal token. */
 const requireAgencyCreator = (req: any, res: any, tenantId: string): boolean => {
-  const s = getSession(getToken(req));
-  if (s) {
-    if (s.role !== "super-admin" && s.role !== "graphic-designer") {
+  const session = getSession(getToken(req));
+  if (session) {
+    if (!canPerformTenantAction(db, session.userId, session.role, tenantId, "create")) {
       res.status(403).json({ error: "Forbidden: Insufficient permissions" });
       return false;
     }
@@ -1006,8 +1226,29 @@ const requireAgencyCreator = (req: any, res: any, tenantId: string): boolean => 
 const postOwnedByTenant = (postId: string, tenantId: string) =>
   db.prepare("SELECT id FROM posts WHERE id = ? AND tenantId = ?").get(postId, tenantId);
 
+const isBoundedString = (value: unknown, max: number): value is string =>
+  typeof value === "string" && value.trim().length > 0 && value.length <= max;
+
+const isOptionalBoundedString = (value: unknown, max: number): boolean =>
+  value === undefined || value === null || (typeof value === "string" && value.length <= max);
+
+const isValidCampaignInput = (campaign: any): boolean =>
+  !!campaign
+  && isBoundedString(campaign.name, 200)
+  && isOptionalBoundedString(campaign.code, 50)
+  && (campaign.color === undefined || (typeof campaign.color === "string" && /^#[0-9a-f]{6}$/i.test(campaign.color)))
+  && isOptionalBoundedString(campaign.startDate, 80)
+  && isOptionalBoundedString(campaign.endDate, 80)
+  && isOptionalBoundedString(campaign.description, 2000);
+
+const isValidPillarInput = (pillar: any): boolean =>
+  !!pillar
+  && isBoundedString(pillar.name, 200)
+  && (pillar.color === undefined || (typeof pillar.color === "string" && /^#[0-9a-f]{6}$/i.test(pillar.color)));
+
 const ALLOWED_UPLOAD_EXT = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".mp4", ".mov", ".avi", ".mkv", ".heic", ".webm"];
-const MAX_UPLOAD_CHUNKS = 80; // 80 × 25MB = 2GB
+const MAX_UPLOAD_CHUNKS = 80;
+const MAX_ASSEMBLED_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024;
 
 // ── Video post-processing (faststart + poster frame) ──────────
 // Browsers cannot start playback of an MP4 whose `moov` atom sits after `mdat`
@@ -1239,9 +1480,25 @@ const requireStaffUpload = (req: any, res: any): boolean => {
   return false;
 };
 
+const uploadOwnerKey = (req: any): string => {
+  const session = getSession(getToken(req));
+  const source = session ? `user:${session.userId}` : String(req.headers["x-tenant-token"] || req.query.token || "");
+  if (!source) return "";
+  return createHash("sha256").update(source).digest("hex");
+};
+
 async function startServer() {
   const app = express();
+  app.disable("x-powered-by");
   const PORT = parseInt(process.env.PORT || "3000", 10);
+  app.use((_req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+    if (process.env.NODE_ENV === "production") res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+    next();
+  });
   
   // Security headers and basic cookie parsing
   app.use(cookieParser());
@@ -1333,48 +1590,60 @@ async function startServer() {
         return res.status(400).json({ error: err.message });
       }
       if (!req.file) return res.status(400).json({ error: "No chunk received" });
-      const uploadId = req.body?.uploadId as string;
-      const chunkIndex = req.body?.chunkIndex as string;
-      const totalChunks = parseInt(req.body?.totalChunks as string, 10);
+      const uploadId = String(req.body?.uploadId || "");
+      const chunkIndex = Number(req.body?.chunkIndex);
+      const totalChunks = Number(req.body?.totalChunks);
+      if (!/^[a-zA-Z0-9_-]{1,128}$/.test(uploadId) || !Number.isInteger(chunkIndex) || chunkIndex < 0 || chunkIndex >= MAX_UPLOAD_CHUNKS || !Number.isInteger(totalChunks) || totalChunks < 1 || totalChunks > MAX_UPLOAD_CHUNKS || chunkIndex >= totalChunks) {
+        return res.status(400).json({ error: "Invalid chunk metadata" });
+      }
       console.log(`[UPLOAD-CHUNK] ${uploadId} chunk ${chunkIndex}/${totalChunks} (${req.file.size} bytes)`);
-      res.json({ ok: true, chunkIndex: parseInt(chunkIndex, 10), totalChunks });
+      res.json({ ok: true, chunkIndex, totalChunks });
     });
   });
 
   app.post("/api/upload-complete", express.json({ limit: "1mb" }), async (req, res) => {
     if (!requireStaffUpload(req, res)) return;
-    const { rawUploadId, uploadId: bodyUploadId, totalChunks, originalFilename } = req.body || {};
-    const uploadId = String(rawUploadId || bodyUploadId || "").replace(/[^a-zA-Z0-9_-]/g, "_");
+    const { uploadId, totalChunks, originalFilename } = req.body || {};
+    const normalizedUploadId = String(uploadId || "");
+    const ownerKey = uploadOwnerKey(req);
     const chunks = Number(totalChunks);
-    if (!uploadId || !originalFilename || !Number.isInteger(chunks) || chunks < 1) {
-      return res.status(400).json({ error: "Missing uploadId, totalChunks, or originalFilename" });
+    if (!/^[a-zA-Z0-9_-]{1,128}$/.test(normalizedUploadId) || !ownerKey || typeof originalFilename !== "string" || !originalFilename.trim() || originalFilename.length > 255 || !Number.isInteger(chunks) || chunks < 1) {
+      return res.status(400).json({ error: "Missing or invalid upload metadata" });
     }
     if (chunks > MAX_UPLOAD_CHUNKS) {
       return res.status(400).json({ error: `Too many chunks (max ${MAX_UPLOAD_CHUNKS})` });
     }
-    const ext = path.extname(String(originalFilename)).toLowerCase();
+    const ext = path.extname(originalFilename).toLowerCase();
     if (!ALLOWED_UPLOAD_EXT.includes(ext)) {
       return res.status(400).json({ error: `Unsupported file type: ${ext}` });
     }
-    const chunkDir = path.join(CHUNKS_DIR, uploadId);
+    const chunkDir = path.join(CHUNKS_DIR, ownerKey, normalizedUploadId);
     if (!existsSync(chunkDir)) {
       return res.status(400).json({ error: "No chunks found for this upload" });
+    }
+    const chunkStats = [];
+    for (let i = 0; i < chunks; i += 1) {
+      const chunkPath = path.join(chunkDir, `chunk-${String(i).padStart(5, "0")}`);
+      if (!existsSync(chunkPath)) return res.status(400).json({ error: `Missing chunk ${i}` });
+      const stats = statSync(chunkPath);
+      if (!stats.isFile() || stats.size > CHUNK_MULTER_LIMIT) return res.status(400).json({ error: `Invalid chunk ${i}` });
+      chunkStats.push(stats.size);
+    }
+    if (chunkStats.reduce((total, size) => total + size, 0) > MAX_ASSEMBLED_UPLOAD_BYTES) {
+      return res.status(413).json({ error: "Assembled upload exceeds the 2 GB limit" });
     }
     const finalFilename = `${Date.now()}-${randomUUID()}${ext}`;
     const finalPath = path.join(UPLOADS_DIR, finalFilename);
     try {
-      const out = createWriteStream(finalPath);
-      for (let i = 0; i < chunks; i++) {
-        const chunkPath = path.join(chunkDir, `chunk-${String(i).padStart(5, "0")}`);
-        if (!existsSync(chunkPath)) {
-          out.destroy();
-          if (existsSync(finalPath)) unlinkSync(finalPath);
-          return res.status(400).json({ error: `Missing chunk ${i}` });
+      const combined = Readable.from((async function* () {
+        for (let i = 0; i < chunks; i += 1) {
+          const chunkPath = path.join(chunkDir, `chunk-${String(i).padStart(5, "0")}`);
+          for await (const chunk of createReadStream(chunkPath)) yield chunk;
         }
-        await pipeline(createReadStream(chunkPath), out, { end: i === chunks - 1 });
-      }
+      })());
+      await pipeline(combined, createWriteStream(finalPath));
       rmSync(chunkDir, { recursive: true });
-      console.log(`[UPLOAD-COMPLETE] ${uploadId} → ${finalFilename}`);
+      console.log(`[UPLOAD-COMPLETE] ${normalizedUploadId} → ${finalFilename}`);
       enqueueMediaProcessing(finalPath);
       res.json({ url: `/uploads/${finalFilename}`, filename: finalFilename });
     } catch (e: any) {
@@ -1406,12 +1675,16 @@ async function startServer() {
   // ── Authentication ──────────────────────────────────────────
   const issueAgencySession = (res: express.Response, user: { id: string; username: string; role: string }) => {
     const token = randomUUID();
-    sessions.set(token, {
+    const session: Session = {
       userId: user.id,
       username: user.username,
       role: user.role as AgencyRole,
       expiresAt: Date.now() + SESSION_TTL_MS,
-    });
+    };
+    const key = sessionTokenHash(token);
+    sessions.set(key, session);
+    db.prepare("INSERT OR REPLACE INTO agency_sessions (tokenHash, userId, createdAt, expiresAt) VALUES (?, ?, ?, ?)")
+      .run(key, user.id, new Date().toISOString(), session.expiresAt);
     res.cookie("osiris_session", token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
@@ -1501,6 +1774,7 @@ async function startServer() {
     const token = getToken(req);
     const session = getSession(token);
     if (!session) return res.status(401).json({ error: "Not signed in" });
+    res.setHeader("Cache-Control", "no-store");
     res.json({
       token,
       user: { id: session.userId, username: session.username, role: session.role },
@@ -1524,12 +1798,18 @@ async function startServer() {
       return res.status(401).json({ error: "Invalid username or password" });
     }
     const token = issueAgencySession(res, user);
+    res.setHeader("Cache-Control", "no-store");
     res.json({ success: true, token, user: { id: user.id, username: user.username, role: user.role } });
   });
 
   app.post("/api/auth/logout", (req, res) => {
     const token = getToken(req);
-    if (token) sessions.delete(token);
+    if (token) {
+      deleteSession(token);
+      for (const socket of io.sockets.sockets.values()) {
+        if ((socket as any).sessionToken === token) socket.disconnect(true);
+      }
+    }
     res.clearCookie("osiris_session", { path: "/" });
     res.json({ success: true });
   });
@@ -1543,17 +1823,13 @@ async function startServer() {
   // Import media from external URL (Google Drive, Dropbox, direct links) — server fetches and stores locally
   app.post("/api/import-url", async (req, res) => {
     if (!requireAuth(req, res)) return;
-    const rawUrl = (req.body?.url as string)?.trim();
-    if (!rawUrl || !rawUrl.startsWith("http")) {
-      return res.status(400).json({ error: "A valid http(s) URL is required" });
-    }
-    const fetchUrl = normalizeExternalMediaUrl(rawUrl);
+    const rawUrl = typeof req.body?.url === "string" ? req.body.url.trim() : "";
+    if (!rawUrl) return res.status(400).json({ error: "A valid http(s) URL is required" });
     const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), 30 * 60 * 1000);
+    const t = setTimeout(() => controller.abort(), 10 * 60 * 1000);
     let outPath = "";
     try {
-      const response = await fetch(fetchUrl, {
-        redirect: "follow",
+      const response = await fetchExternalMedia(rawUrl, {
         signal: controller.signal,
         headers: {
           "User-Agent": "Mozilla/5.0 (compatible; OsirisReviewRoom/1.0)",
@@ -1570,10 +1846,14 @@ async function startServer() {
             "That URL points to a web page, not a media file. For Google Drive: File → Share → Anyone with the link, then paste the link here. Or upload the file from your computer.",
         });
       }
+      const declaredSize = Number(response.headers.get("content-length"));
+      if (Number.isFinite(declaredSize) && declaredSize > MAX_EXTERNAL_MEDIA_BYTES) {
+        return res.status(413).json({ error: "External media exceeds the 256 MB import limit" });
+      }
       const body = response.body;
       if (!body) return res.status(400).json({ error: "Empty response from URL" });
 
-      let ext = extFromContentType(ct) || extFromUrl(fetchUrl) || extFromUrl(rawUrl) || ".mp4";
+      let ext = extFromContentType(ct) || extFromUrl(rawUrl) || ".mp4";
       const filename = `${Date.now()}-${randomUUID()}${ext}`;
       outPath = path.join(UPLOADS_DIR, filename);
       const write = createWriteStream(outPath);
@@ -1585,10 +1865,11 @@ async function startServer() {
           try {
             const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
             total += buf.length;
-            if (total > MAX_IMPORT_URL_BYTES) {
+            if (total > MAX_EXTERNAL_MEDIA_BYTES) {
               cb(new Error("File exceeds maximum import size"));
               return;
             }
+
             if (!sniffed) {
               sniffed = true;
               const head = buf.slice(0, Math.min(512, buf.length)).toString("utf8").trimStart().toLowerCase();
@@ -1606,7 +1887,10 @@ async function startServer() {
 
       const nodeReadable = Readable.fromWeb(body as any);
       await pipeline(nodeReadable, sniffTransform, write);
-      console.log(`[IMPORT-URL] ${rawUrl.slice(0, 80)}… → ${filename} (${total} bytes)`);
+       let sourceHost = "external";
+       try { sourceHost = new URL(rawUrl).hostname; } catch { }
+       console.log(`[IMPORT-URL] ${sourceHost} → ${filename} (${total} bytes)`);
+
       res.json({ url: `/uploads/${filename}`, filename, size: total });
     } catch (e: any) {
       if (outPath && existsSync(outPath)) {
@@ -1617,7 +1901,8 @@ async function startServer() {
         : e?.name === "AbortError"
           ? "Import timed out"
           : e?.message || "Failed to import from URL";
-      console.error("[IMPORT-URL]", msg, e);
+       console.error(`[IMPORT-URL] ${msg}`);
+
       res.status(400).json({ error: msg });
     } finally {
       clearTimeout(t);
@@ -1626,45 +1911,75 @@ async function startServer() {
 
   // ── Tenants REST ──────────────────────────────────────────
   app.get("/api/tenants", (req, res) => {
-    if (!requireAuth(req, res)) return;
-    const tenants = db.prepare("SELECT * FROM tenants").all();
-    res.json(tenants.map((t: any) => tenantPublic({ ...t, settings: parseTenantSettings(t.settings) })));
+    const auth = requireAuth(req, res);
+    if (!auth) return;
+    const allowed = new Set(allowedTenantIdsForSession(auth.user));
+    const tenants = db.prepare("SELECT * FROM tenants").all() as any[];
+    res.json(tenants.filter((tenant) => allowed.has(tenant.id)).map((t) => tenantPublic({ ...t, settings: parseTenantSettings(t.settings) })));
   });
 
   app.get("/api/tenants/:id/invite", (req, res) => {
-    if (!requireRole(req, res, ["graphic-designer", "marketing-team", "reviewer"])) return;
+    const auth = requireTenantRole(req, res, req.params.id, ["graphic-designer", "marketing-team", "reviewer"]);
+    if (!auth) return;
     const { id } = req.params;
     const tenant = db.prepare("SELECT * FROM tenants WHERE id = ?").get(id) as any;
     if (!tenant) return res.status(404).json({ error: "Tenant not found" });
     const settings = parseTenantSettings(tenant.settings);
+    let tokensChanged = false;
+    if (!settings.clientToken) {
+      settings.clientToken = randomUUID();
+      tokensChanged = true;
+    }
+    if (auth.user.role !== "reviewer" && !settings.internalToken) {
+      settings.internalToken = randomUUID();
+      tokensChanged = true;
+    }
+    if (tokensChanged) {
+      db.prepare("UPDATE tenants SET settings = ? WHERE id = ?").run(JSON.stringify(settings), id);
+      tenant.settings = JSON.stringify(settings);
+    }
     const origin = publicOrigin(req);
-    res.json({
+    res.setHeader("Cache-Control", "no-store");
+    const response: Record<string, unknown> = {
       tenantId: id,
       name: tenant.name,
-      clientToken: settings.clientToken || "",
-      internalToken: settings.internalToken || "",
       clientUrl: `${origin}/client/${id}?token=${settings.clientToken || ""}`,
-      agencyUrl: `${origin}/agency/${id}?token=${settings.internalToken || ""}`,
-    });
+      expiresAt: null,
+    };
+    if (auth.user.role !== "reviewer") {
+      response.agencyUrl = `${origin}/agency/${id}?token=${settings.internalToken || ""}`;
+    }
+    res.json(response);
   });
 
   app.delete("/api/tenants/:id", (req, res) => {
     if (!requireSuperAdmin(req, res)) return;
     const { id } = req.params;
-    const allPosts = db.prepare("SELECT mediaUrls, thumbnailUrl FROM posts WHERE tenantId = ?").all(id) as any[];
-    db.transaction(() => {
+     const allPosts = db.prepare("SELECT mediaUrls, thumbnailUrl FROM posts WHERE tenantId = ?").all(id) as any[];
+     const revokedShares = revokeTenantShareRecords(id);
+     db.transaction(() => {
+
       const posts = db.prepare("SELECT id FROM posts WHERE tenantId = ?").all(id) as { id: string }[];
       for (const p of posts) {
         db.prepare("DELETE FROM comments WHERE postId = ?").run(p.id);
         db.prepare("DELETE FROM tasks WHERE postId = ?").run(p.id);
       }
-      db.prepare("DELETE FROM posts WHERE tenantId = ?").run(id);
-      db.prepare("DELETE FROM campaigns WHERE tenantId = ?").run(id);
+       db.prepare("DELETE FROM posts WHERE tenantId = ?").run(id);
+       db.prepare("DELETE FROM share_set_posts WHERE shareSetId IN (SELECT id FROM share_sets WHERE tenantId = ?)").run(id);
+       db.prepare("DELETE FROM post_client_shares WHERE tenantId = ?").run(id);
+       db.prepare("DELETE FROM share_sets WHERE tenantId = ?").run(id);
+       db.prepare("DELETE FROM campaigns WHERE tenantId = ?").run(id);
       db.prepare("DELETE FROM content_pillars WHERE tenantId = ?").run(id);
       db.prepare("DELETE FROM activity_log WHERE tenantId = ?").run(id);
+      db.prepare("DELETE FROM tenant_memberships WHERE tenantId = ?").run(id);
       db.prepare("DELETE FROM tenants WHERE id = ?").run(id);
-    })();
-    allPosts.forEach((post) => {
+
+     })();
+     disconnectTenantSockets(io, id);
+     for (const token of revokedShares.postTokens) disconnectShareSockets(io, token, "share");
+     for (const token of revokedShares.setTokens) disconnectShareSockets(io, token, "share-set");
+     allPosts.forEach((post) => {
+
       if (post.thumbnailUrl) deleteAssetByUrl(post.thumbnailUrl);
       try {
         const urls = JSON.parse(post.mediaUrls || "[]");
@@ -1679,23 +1994,45 @@ async function startServer() {
   app.post("/api/tenants/:id/rotate-token", (req, res) => {
     if (!requireSuperAdmin(req, res)) return;
     const { id } = req.params;
-    const { tokenType } = req.body as { tokenType: "client" | "internal" | "both" };
+    const tokenType = req.body?.tokenType;
+    if (tokenType !== "client" && tokenType !== "internal" && tokenType !== "both") {
+      return res.status(400).json({ error: "tokenType must be client, internal, or both" });
+    }
     const tenant = db.prepare("SELECT * FROM tenants WHERE id = ?").get(id) as any;
     if (!tenant) return res.status(404).json({ error: "Tenant not found" });
-    const settings = JSON.parse(tenant.settings || "{}");
+    const settings = parseTenantSettings(tenant.settings);
     if (tokenType === "client" || tokenType === "both") settings.clientToken = randomUUID();
     if (tokenType === "internal" || tokenType === "both") settings.internalToken = randomUUID();
     db.prepare("UPDATE tenants SET settings = ? WHERE id = ?").run(JSON.stringify(settings), id);
+    if (tokenType === "client" || tokenType === "both") disconnectTokenSockets(io, id, "client");
+    if (tokenType === "internal" || tokenType === "both") disconnectTokenSockets(io, id, "internal");
     const updated = { ...tenant, settings };
     io.emit("tenant-updated", tenantPublic(updated));
-    res.json({ success: true, settings });
+    const origin = publicOrigin(req);
+    res.setHeader("Cache-Control", "no-store");
+    const response: Record<string, unknown> = {
+      success: true,
+      tenantId: id,
+      tokenType,
+      rotatedAt: new Date().toISOString(),
+      expiresAt: null,
+    };
+    if (tokenType === "client" || tokenType === "both") {
+      response.clientUrl = `${origin}/client/${id}?token=${settings.clientToken || ""}`;
+    }
+    if (tokenType === "internal" || tokenType === "both") {
+      response.agencyUrl = `${origin}/agency/${id}?token=${settings.internalToken || ""}`;
+    }
+    res.json(response);
   });
 
   // ── Global Stats ──────────────────────────────────────────
   app.get("/api/stats", (req, res) => {
-    if (!requireAuth(req, res)) return;
-    const tenants = db.prepare("SELECT * FROM tenants").all() as any[];
-    const allPosts = db.prepare("SELECT * FROM posts").all() as any[];
+    const auth = requireAuth(req, res);
+    if (!auth) return;
+    const allowed = new Set(allowedTenantIdsForSession(auth.user));
+    const tenants = (db.prepare("SELECT * FROM tenants").all() as any[]).filter((tenant) => allowed.has(tenant.id));
+    const allPosts = (db.prepare("SELECT * FROM posts").all() as any[]).filter((post) => allowed.has(post.tenantId));
     const perTenant = tenants.map((t: any) => {
       const tp = allPosts.filter((p: any) => p.tenantId === t.id);
       return {
@@ -1722,8 +2059,8 @@ async function startServer() {
 
   // ── Analytics ─────────────────────────────────────────────
   app.get("/api/analytics", (req, res) => {
-    if (!requireAuth(req, res)) return;
     const { tenantId, from, to } = req.query as { tenantId: string; from?: string; to?: string };
+    if (!requireTenantQueryAccess(req, res, tenantId)) return;
     let query = "SELECT * FROM posts WHERE tenantId = ?";
     const params: any[] = [tenantId];
     if (from) { query += " AND date >= ?"; params.push(from); }
@@ -1772,8 +2109,8 @@ async function startServer() {
 
   // ── CSV Export ────────────────────────────────────────────
   app.get("/api/export/posts", (req, res) => {
-    if (!requireAuth(req, res)) return;
     const { tenantId, from, to } = req.query as { tenantId: string; from?: string; to?: string };
+    if (!requireTenantQueryAccess(req, res, tenantId)) return;
     let query = "SELECT * FROM posts WHERE tenantId = ?";
     const params: string[] = [tenantId];
     if (from) { query += " AND date >= ?"; params.push(from); }
@@ -1793,8 +2130,9 @@ async function startServer() {
   // ── Posts REST ───────────────────────────────────────────
   app.get("/api/posts", (req, res) => {
     const tenantId = (req.query.tenantId as string) || "acmecorp";
+    const session = getSession(getToken(req));
     if (!requireTenantAuth(req, res, tenantId)) return;
-    if (getSession(getToken(req))) {
+    if (session) {
       res.json(getPosts(tenantId));
       return;
     }
@@ -1810,17 +2148,22 @@ async function startServer() {
 
   // ── Global Search ─────────────────────────────────────────
   app.get("/api/search", (req, res) => {
-    if (!requireAuth(req, res)) return;
+    const auth = requireAuth(req, res);
+    if (!auth) return;
     const q = ((req.query.q as string) || "").trim();
     if (!q) return res.json([]);
+    const allowed = allowedTenantIdsForSession(auth.user);
+    if (!allowed.length) return res.json([]);
     const like = `%${q}%`;
+    const placeholders = allowed.map(() => "?").join(",");
     const rows = db.prepare(`
       SELECT p.*, t.name as tenantName
       FROM posts p
       JOIN tenants t ON t.id = p.tenantId
-      WHERE p.title LIKE ? OR p.caption LIKE ? OR p.hashtags LIKE ? OR t.name LIKE ?
+      WHERE (p.title LIKE ? OR p.caption LIKE ? OR p.hashtags LIKE ? OR t.name LIKE ?)
+        AND p.tenantId IN (${placeholders})
       LIMIT 50
-    `).all(like, like, like, like) as any[];
+    `).all(like, like, like, like, ...allowed) as any[];
     const results = rows.map((r: any) => {
       const post = {
         ...r,
@@ -1845,11 +2188,12 @@ async function startServer() {
     const expiresInDays = Number.isFinite(rawDays) ? Math.min(365, Math.max(1, rawDays)) : 90;
     const shareRowId = randomUUID();
     const token = randomUUID();
+    const tokenHash = hashShareToken(token);
     const createdAt = new Date().toISOString();
     const expiresAt = new Date(Date.now() + expiresInDays * 86400000).toISOString();
     db.prepare(
-      "INSERT INTO post_client_shares (id, tenantId, postId, token, createdAt, expiresAt, revoked) VALUES (?,?,?,?,?,?,0)"
-    ).run(shareRowId, tenantId, postId, token, createdAt, expiresAt);
+      "INSERT INTO post_client_shares (id, tenantId, postId, token, tokenHash, createdAt, expiresAt, revoked) VALUES (?,?,?,NULL,?,?,?,0)"
+    ).run(shareRowId, tenantId, postId, tokenHash, createdAt, expiresAt);
     const sharePath = `/review/${token}`;
     const host = req.get("x-forwarded-host") || req.get("host") || `localhost:${PORT}`;
     const proto = (req.get("x-forwarded-proto") || req.protocol || "http").split(",")[0].trim();
@@ -1859,10 +2203,11 @@ async function startServer() {
   app.delete("/api/tenants/:tenantId/posts/:postId/client-share", (req, res) => {
     const { tenantId, postId } = req.params;
     if (!requireAgencyMutator(req, res, tenantId)) return;
-    const tokens = db.prepare("SELECT token FROM post_client_shares WHERE postId = ? AND tenantId = ? AND revoked = 0").all(postId, tenantId) as { token: string }[];
+    const tokens = db.prepare("SELECT tokenHash FROM post_client_shares WHERE postId = ? AND tenantId = ? AND revoked = 0").all(postId, tenantId) as { tokenHash: string }[];
     db.prepare("UPDATE post_client_shares SET revoked = 1 WHERE postId = ? AND tenantId = ?").run(postId, tenantId);
-    for (const { token } of tokens) {
-      io.to(`share:${token}`).emit("post-deleted", postId);
+    for (const { tokenHash } of tokens) {
+      io.to(`share:${tokenHash}`).emit("post-deleted", postId);
+      disconnectShareSockets(io, tokenHash, "share");
     }
     res.json({ success: true, revoked: tokens.length });
   });
@@ -1872,21 +2217,36 @@ async function startServer() {
     const { tenantId } = req.params;
     if (!requireAgencyMutator(req, res, tenantId)) return;
     const { postIds, name, expiresInDays } = req.body || {};
-    if (!Array.isArray(postIds) || postIds.length === 0) {
-      return res.status(400).json({ error: "postIds array is required" });
+    if (!Array.isArray(postIds) || postIds.length === 0 || postIds.length > 100) {
+      return res.status(400).json({ error: "postIds must contain between 1 and 100 items" });
+    }
+    const uniquePostIds = [...new Set(postIds)];
+    if (uniquePostIds.some((postId) => typeof postId !== "string" || !postId.trim() || postId.length > 200)) {
+      return res.status(400).json({ error: "postIds contains an invalid post id" });
+    }
+    if (name !== undefined && (typeof name !== "string" || name.length > 200)) {
+      return res.status(400).json({ error: "name is invalid" });
+    }
+    const expiryDays = expiresInDays === undefined || expiresInDays === null || expiresInDays === "" ? null : Number(expiresInDays);
+    if (expiryDays !== null && (!Number.isInteger(expiryDays) || expiryDays < 1 || expiryDays > 365)) {
+      return res.status(400).json({ error: "expiresInDays must be between 1 and 365" });
+    }
+    const ownedPostIds = new Set((db.prepare("SELECT id FROM posts WHERE tenantId = ? AND id IN (" + uniquePostIds.map(() => "?").join(",") + ")").all(tenantId, ...uniquePostIds) as { id: string }[]).map((row) => row.id));
+    if (ownedPostIds.size !== uniquePostIds.length) {
+      return res.status(400).json({ error: "One or more posts do not belong to this workspace" });
     }
     const id = randomUUID();
     const token = randomUUID();
+    const tokenHash = hashShareToken(token);
     const createdAt = new Date().toISOString();
-    const expiresAt = expiresInDays ? new Date(Date.now() + expiresInDays * 86400000).toISOString() : null;
+    const expiresAt = expiryDays !== null ? new Date(Date.now() + expiryDays * 86400000).toISOString() : null;
     db.transaction(() => {
       db.prepare(
-        "INSERT INTO share_sets (id, tenantId, name, token, createdAt, expiresAt, revoked) VALUES (?,?,?,?,?,?,0)"
-      ).run(id, tenantId, name || null, token, createdAt, expiresAt);
+        "INSERT INTO share_sets (id, tenantId, name, token, tokenHash, createdAt, expiresAt, revoked) VALUES (?,?,?,NULL,?,?,?,0)"
+      ).run(id, tenantId, name || null, tokenHash, createdAt, expiresAt);
       const insertPost = db.prepare("INSERT INTO share_set_posts (shareSetId, postId) VALUES (?,?)");
-      const owned = db.prepare("SELECT id FROM posts WHERE id = ? AND tenantId = ?");
-      for (const postId of postIds) {
-        if (owned.get(postId, tenantId)) insertPost.run(id, postId);
+      for (const postId of uniquePostIds) {
+        insertPost.run(id, postId);
       }
     })();
     const host = req.get("x-forwarded-host") || req.get("host") || `localhost:${PORT}`;
@@ -1898,7 +2258,7 @@ async function startServer() {
   app.get("/api/tenants/:tenantId/share-sets", (req, res) => {
     const { tenantId } = req.params;
     if (!requireAgencyOrInternalStaff(req, res, tenantId)) return;
-    const sets = db.prepare("SELECT * FROM share_sets WHERE tenantId = ? ORDER BY createdAt DESC").all(tenantId) as any[];
+    const sets = db.prepare("SELECT id, name, createdAt, expiresAt, revoked FROM share_sets WHERE tenantId = ? ORDER BY createdAt DESC").all(tenantId) as any[];
     const results = sets.map((s: any) => {
       const count = db.prepare("SELECT COUNT(*) as cnt FROM share_set_posts WHERE shareSetId = ?").get(s.id) as { cnt: number };
       return { ...s, postCount: count.cnt };
@@ -1919,21 +2279,28 @@ async function startServer() {
 
   app.delete("/api/share-sets/:id", (req, res) => {
     const { id } = req.params;
-    const row = db.prepare("SELECT tenantId FROM share_sets WHERE id = ?").get(id) as { tenantId: string } | undefined;
+    const row = db.prepare("SELECT tenantId, tokenHash FROM share_sets WHERE id = ?").get(id) as { tenantId: string; tokenHash: string } | undefined;
     if (!row) return res.status(404).json({ error: "Not found" });
     if (!requireAgencyMutator(req, res, row.tenantId)) return;
     db.prepare("UPDATE share_sets SET revoked = 1 WHERE id = ?").run(id);
+    disconnectShareSockets(io, row.tokenHash, "share-set");
     res.json({ success: true });
   });
 
   app.get("/api/posts/schedule", (req, res) => {
-    if (!requireAuth(req, res)) return;
+    const auth = requireAuth(req, res);
+    if (!auth) return;
     const { tenantId } = req.query as { tenantId?: string };
-    let posts;
+    const allowed = new Set(allowedTenantIdsForSession(auth.user));
+    let posts: any[];
     if (tenantId) {
+      if (!allowed.has(tenantId)) {
+        return res.status(403).json({ error: "Forbidden: You do not have access to this tenant" });
+      }
       posts = db.prepare("SELECT * FROM posts WHERE tenantId = ? AND (internalStatus = 'Scheduled' OR scheduledAt IS NOT NULL)").all(tenantId) as any[];
     } else {
-      posts = db.prepare("SELECT * FROM posts WHERE internalStatus = 'Scheduled' OR scheduledAt IS NOT NULL").all() as any[];
+      posts = (db.prepare("SELECT * FROM posts WHERE internalStatus = 'Scheduled' OR scheduledAt IS NOT NULL").all() as any[])
+        .filter((post) => allowed.has(post.tenantId));
     }
     res.json(posts.map(p => ({ ...p, mediaUrls: JSON.parse((p as any).mediaUrls || "[]") })));
   });
@@ -1942,24 +2309,30 @@ async function startServer() {
     const { id } = req.params;
     const tenantId = (req.query.tenantId as string) || "acmecorp";
     if (!requireAgencyCreator(req, res, tenantId)) return;
-    
-    const shareTokens = getActiveShareTokensForPost(id);
-    const post = db.prepare("SELECT mediaUrls, thumbnailUrl FROM posts WHERE id = ? AND tenantId = ?").get(id, tenantId) as any;
-    db.prepare("UPDATE post_client_shares SET revoked = 1 WHERE postId = ?").run(id);
-    for (const tkn of shareTokens) {
-      io.to(`share:${tkn}`).emit("post-deleted", id);
+    const post = db.prepare("SELECT title, mediaUrls, thumbnailUrl FROM posts WHERE id = ? AND tenantId = ?").get(id, tenantId) as any;
+    if (!post) return res.status(404).json({ error: "Post not found in this workspace" });
+     const shareTokens = getActiveShareTokensForPost(id);
+     const shareSetTokens = revokeShareSetsForPost(id);
+     db.transaction(() => {
+
+      db.prepare("UPDATE post_client_shares SET revoked = 1 WHERE postId = ? AND tenantId = ?").run(id, tenantId);
+      db.prepare("DELETE FROM posts WHERE id = ? AND tenantId = ?").run(id, tenantId);
+      db.prepare("DELETE FROM comments WHERE postId = ?").run(id);
+      db.prepare("DELETE FROM tasks WHERE postId = ?").run(id);
+    })();
+    for (const token of shareTokens) {
+      io.to(`share:${token}`).emit("post-deleted", id);
+      disconnectShareSockets(io, token, "share");
     }
-    emitToShareSetRooms(io, id, "post-deleted", id);
-    db.prepare("DELETE FROM posts WHERE id = ? AND tenantId = ?").run(id, tenantId);
-    db.prepare("DELETE FROM comments WHERE postId = ?").run(id);
-    db.prepare("DELETE FROM tasks WHERE postId = ?").run(id);
-    if (post) {
-      if (post.thumbnailUrl) deleteAssetByUrl(post.thumbnailUrl);
-      try {
-        const urls = JSON.parse(post.mediaUrls || "[]");
-        urls.forEach(deleteAssetByUrl);
-      } catch { }
+    for (const token of shareSetTokens) {
+      io.to(`share-set:${token}`).emit("post-deleted", id);
+      disconnectShareSockets(io, token, "share-set");
     }
+    if (post.thumbnailUrl) deleteAssetByUrl(post.thumbnailUrl);
+    try {
+      const urls = JSON.parse(post.mediaUrls || "[]");
+      urls.forEach(deleteAssetByUrl);
+    } catch { }
     io.to(tenantId).emit("post-deleted", id);
     io.to(`${tenantId}:internal`).emit("post-deleted", id);
     io.to(`${tenantId}:client`).emit("post-deleted", id);
@@ -1970,14 +2343,13 @@ async function startServer() {
   app.delete("/api/comments/:id", (req, res) => {
     const { id } = req.params;
     const tenantId = (req.query.tenantId as string) || "acmecorp";
-    const postId = req.query.postId as string;
     if (!requireAgencyMutator(req, res, tenantId)) return;
     const owned = db.prepare(`
-      SELECT c.id FROM comments c JOIN posts p ON p.id = c.postId WHERE c.id = ? AND p.tenantId = ?
-    `).get(id, tenantId);
+      SELECT c.id, c.postId FROM comments c JOIN posts p ON p.id = c.postId WHERE c.id = ? AND p.tenantId = ?
+    `).get(id, tenantId) as { id: string; postId: string } | undefined;
     if (!owned) return res.status(404).json({ error: "Not found" });
     db.prepare("DELETE FROM comments WHERE id = ?").run(id);
-    if (postId) broadcastPostUpdated(tenantId, postId);
+    broadcastPostUpdated(tenantId, owned.postId);
     res.json({ success: true });
   });
 
@@ -1985,14 +2357,13 @@ async function startServer() {
   app.delete("/api/tasks/:id", (req, res) => {
     const { id } = req.params;
     const tenantId = (req.query.tenantId as string) || "acmecorp";
-    const postId = req.query.postId as string;
     if (!requireAgencyMutator(req, res, tenantId)) return;
     const owned = db.prepare(`
-      SELECT t.id FROM tasks t JOIN posts p ON p.id = t.postId WHERE t.id = ? AND p.tenantId = ?
-    `).get(id, tenantId);
+      SELECT t.id, t.postId FROM tasks t JOIN posts p ON p.id = t.postId WHERE t.id = ? AND p.tenantId = ?
+    `).get(id, tenantId) as { id: string; postId: string } | undefined;
     if (!owned) return res.status(404).json({ error: "Not found" });
     db.prepare("DELETE FROM tasks WHERE id = ?").run(id);
-    if (postId) broadcastPostUpdated(tenantId, postId);
+    broadcastPostUpdated(tenantId, owned.postId);
     res.json({ success: true });
   });
 
@@ -2041,21 +2412,30 @@ async function startServer() {
       role: u.role,
       createdAt: u.createdAt,
       hasPassword: !!(u.passwordHash && String(u.passwordHash).length > 0),
+      tenantIds: getTenantMemberships(db, u.id),
     })));
   });
 
   app.post("/api/agency-users", (req, res) => {
     if (!requireSuperAdmin(req, res)) return;
-    const { username, password, role } = req.body;
+    const { username, password, role, tenantIds } = req.body || {};
     if (!username || !String(username).trim()) return res.status(400).json({ error: "email / username required" });
     const uname = normalizeUsername(username);
     const r = (role && ALL_AGENCY_ROLES.includes(role as AgencyRole)) ? role : "graphic-designer";
+    const requestedTenantIds = tenantIds === undefined ? [] : tenantIds;
+    if (!Array.isArray(requestedTenantIds) || requestedTenantIds.some((tenantId) => typeof tenantId !== "string")) {
+      return res.status(400).json({ error: "tenantIds must be an array of tenant ids" });
+    }
+    for (const tenantId of new Set(requestedTenantIds)) {
+      if (!db.prepare("SELECT id FROM tenants WHERE id = ?").get(tenantId)) return res.status(400).json({ error: `Tenant not found: ${tenantId}` });
+    }
     const existing = db.prepare("SELECT id FROM agency_users WHERE lower(username) = lower(?)").get(uname);
     if (existing) return res.status(400).json({ error: "Username already exists" });
     const id = randomUUID();
     const passwordHash = password && String(password).trim() ? hashPassword(String(password).trim()) : "";
     db.prepare("INSERT INTO agency_users (id, username, passwordHash, role, createdAt) VALUES (?,?,?,?,?)")
       .run(id, uname, passwordHash, r, new Date().toISOString());
+    setTenantMemberships(db, id, requestedTenantIds);
     const created = db.prepare("SELECT id, username, role, createdAt, passwordHash FROM agency_users WHERE id = ?").get(id) as any;
     res.json({
       id: created.id,
@@ -2063,20 +2443,46 @@ async function startServer() {
       role: created.role,
       createdAt: created.createdAt,
       hasPassword: !!(created.passwordHash && String(created.passwordHash).length > 0),
+      tenantIds: getTenantMemberships(db, created.id),
     });
   });
 
   app.patch("/api/agency-users/:id", (req, res) => {
     if (!requireSuperAdmin(req, res)) return;
-    const { username, password, role } = req.body;
+    const targetUser = db.prepare("SELECT id, role FROM agency_users WHERE id = ?").get(req.params.id) as { id: string; role: string } | undefined;
+    if (!targetUser) return res.status(404).json({ error: "User not found" });
+    const { username, password, role, tenantIds } = req.body || {};
+    if (targetUser.role === "super-admin" && role && role !== "super-admin" && ALL_AGENCY_ROLES.includes(role as AgencyRole)) {
+      const count = db.prepare("SELECT COUNT(*) AS count FROM agency_users WHERE role = 'super-admin'").get() as { count: number };
+      if (count.count <= 1) return res.status(400).json({ error: "Cannot demote the last super-admin" });
+    }
     const updates: string[] = [];
     const params: any[] = [];
+    const passwordChanged = !!password && !!String(password).trim();
     if (username) { updates.push("username = ?"); params.push(normalizeUsername(username)); }
-    if (password && String(password).trim()) { updates.push("passwordHash = ?"); params.push(hashPassword(String(password).trim())); }
+    if (passwordChanged) { updates.push("passwordHash = ?"); params.push(hashPassword(String(password).trim())); }
     if (role && ALL_AGENCY_ROLES.includes(role as AgencyRole)) { updates.push("role = ?"); params.push(role); }
-    if (updates.length === 0) return res.status(400).json({ error: "No valid fields to update" });
-    params.push(req.params.id);
-    db.prepare(`UPDATE agency_users SET ${updates.join(", ")} WHERE id = ?`).run(...params);
+    if (tenantIds !== undefined) {
+      if (!Array.isArray(tenantIds) || tenantIds.some((tenantId) => typeof tenantId !== "string")) {
+        return res.status(400).json({ error: "tenantIds must be an array of tenant ids" });
+      }
+      for (const tenantId of new Set(tenantIds)) {
+        if (!db.prepare("SELECT id FROM tenants WHERE id = ?").get(tenantId)) return res.status(400).json({ error: `Tenant not found: ${tenantId}` });
+      }
+    }
+    if (updates.length === 0 && tenantIds === undefined) return res.status(400).json({ error: "No valid fields to update" });
+    if (updates.length > 0) {
+      params.push(req.params.id);
+      db.prepare(`UPDATE agency_users SET ${updates.join(", ")} WHERE id = ?`).run(...params);
+    }
+    if (tenantIds !== undefined) {
+      setTenantMemberships(db, req.params.id, tenantIds);
+      disconnectUserSockets(io, req.params.id);
+    }
+    if (passwordChanged) {
+      revokeUserSessions(req.params.id);
+      disconnectUserSockets(io, req.params.id);
+    }
     const updated = db.prepare("SELECT id, username, role, createdAt, passwordHash FROM agency_users WHERE id = ?").get(req.params.id) as any;
     res.json({
       id: updated.id,
@@ -2084,6 +2490,7 @@ async function startServer() {
       role: updated.role,
       createdAt: updated.createdAt,
       hasPassword: !!(updated.passwordHash && String(updated.passwordHash).length > 0),
+      tenantIds: getTenantMemberships(db, updated.id),
     });
   });
 
@@ -2099,8 +2506,40 @@ async function startServer() {
       const n = (db.prepare("SELECT COUNT(*) as c FROM agency_users WHERE role = 'super-admin'").get() as any).c;
       if (n <= 1) return res.status(400).json({ error: "Cannot delete the last super-admin" });
     }
-    db.prepare("DELETE FROM agency_users WHERE id = ?").run(req.params.id);
+    db.transaction(() => {
+      db.prepare("DELETE FROM tenant_memberships WHERE userId = ?").run(req.params.id);
+      db.prepare("DELETE FROM agency_sessions WHERE userId = ?").run(req.params.id);
+      db.prepare("DELETE FROM mcp_tokens WHERE userId = ?").run(req.params.id);
+      db.prepare("DELETE FROM agency_users WHERE id = ?").run(req.params.id);
+    })();
+    for (const [key, session] of sessions) {
+      if (session.userId === req.params.id) sessions.delete(key);
+    }
+    disconnectUserSockets(io, req.params.id);
     res.json({ success: true });
+  });
+
+  app.get("/api/agency-users/:id/tenants", (req, res) => {
+    if (!requireSuperAdmin(req, res)) return;
+    const user = db.prepare("SELECT id FROM agency_users WHERE id = ?").get(req.params.id);
+    if (!user) return res.status(404).json({ error: "User not found" });
+    res.json({ userId: req.params.id, tenantIds: getTenantMemberships(db, req.params.id) });
+  });
+
+  app.put("/api/agency-users/:id/tenants", (req, res) => {
+    if (!requireSuperAdmin(req, res)) return;
+    const user = db.prepare("SELECT id FROM agency_users WHERE id = ?").get(req.params.id);
+    if (!user) return res.status(404).json({ error: "User not found" });
+    const tenantIds = req.body?.tenantIds;
+    if (!Array.isArray(tenantIds) || tenantIds.some((tenantId) => typeof tenantId !== "string")) {
+      return res.status(400).json({ error: "tenantIds must be an array of tenant ids" });
+    }
+    for (const tenantId of new Set(tenantIds)) {
+      if (!db.prepare("SELECT id FROM tenants WHERE id = ?").get(tenantId)) return res.status(400).json({ error: `Tenant not found: ${tenantId}` });
+    }
+    setTenantMemberships(db, req.params.id, tenantIds);
+    disconnectUserSockets(io, req.params.id);
+    res.json({ userId: req.params.id, tenantIds: getTenantMemberships(db, req.params.id) });
   });
 
   app.get("/api/mcp-tokens", (req, res) => {
@@ -2215,29 +2654,37 @@ async function startServer() {
 
   // ── Campaigns REST ─────────────────────────────────────────
   app.get("/api/campaigns", (req, res) => {
-    if (!requireAuth(req, res)) return;
     const { tenantId } = req.query as { tenantId: string };
+    if (!requireTenantQueryAccess(req, res, tenantId)) return;
     res.json(db.prepare("SELECT * FROM campaigns WHERE tenantId = ? ORDER BY startDate").all(tenantId));
   });
 
   // ── Content Pillars REST ───────────────────────────────────
   app.get("/api/pillars", (req, res) => {
-    if (!requireAuth(req, res)) return;
     const { tenantId } = req.query as { tenantId: string };
+    if (!requireTenantQueryAccess(req, res, tenantId)) return;
     res.json(db.prepare("SELECT * FROM content_pillars WHERE tenantId = ?").all(tenantId));
   });
 
   // ── Audit Log REST ─────────────────────────────────────────
   app.get("/api/audit", (req, res) => {
-    if (!requireAuth(req, res)) return;
+    const auth = requireAuth(req, res);
+    if (!auth) return;
     const { tenantId, limit = "50" } = req.query as { tenantId?: string; limit?: string };
-    let rows;
+    const boundedLimit = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 200);
     if (tenantId) {
-      rows = db.prepare("SELECT * FROM activity_log WHERE tenantId = ? ORDER BY timestamp DESC LIMIT ?")
-        .all(tenantId, parseInt(limit));
-    } else {
-      rows = db.prepare("SELECT * FROM activity_log ORDER BY timestamp DESC LIMIT ?").all(parseInt(limit));
+      if (!canAccessTenant(db, auth.user.userId, auth.user.role, tenantId)) {
+        return res.status(403).json({ error: "Forbidden: You do not have access to this tenant" });
+      }
+      const rows = db.prepare("SELECT * FROM activity_log WHERE tenantId = ? ORDER BY timestamp DESC LIMIT ?")
+        .all(tenantId, boundedLimit);
+      return res.json(rows);
     }
+    const allowed = allowedTenantIdsForSession(auth.user);
+    if (!allowed.length) return res.json([]);
+    const placeholders = allowed.map(() => "?").join(",");
+    const rows = db.prepare(`SELECT * FROM activity_log WHERE tenantId IN (${placeholders}) ORDER BY timestamp DESC LIMIT ?`)
+      .all(...allowed, boundedLimit);
     res.json(rows);
   });
 
@@ -2274,73 +2721,82 @@ async function startServer() {
 
   // ── Socket.io ────────────────────────────────────────────
   io.on("connection", (socket) => {
-    
-    // Global Event Authorization Middleware
+    const handshakeToken = typeof socket.handshake?.auth?.token === "string" ? String(socket.handshake.auth.token) : "";
+    (socket as any).sessionToken = handshakeToken;
+
     socket.use(([event, ...args], next) => {
-      if ([
-        "join-tenant", "join-post-share", "join-share-set",
-        "upsert-tenant",
-        "create-campaign", "update-campaign", "delete-campaign",
-        "create-pillar", "delete-pillar",
-        "disconnect",
-      ].includes(event)) {
+      if (["join-tenant", "join-post-share", "join-share-set", "disconnect"].includes(event)) return next();
+
+      const rawData = args[0];
+      const data = rawData && typeof rawData === "object" ? rawData as Record<string, any> : {};
+      if (event === "upsert-tenant") {
+        const session = getSocketSession(socket);
+        const currentActor = (socket as any).actor as SocketActor | undefined;
+        if (!session || session.role !== "super-admin" || (currentActor && currentActor.kind !== "staff")) {
+          return rejectSocketEvent(socket, next, "Unauthorized: Super-admin access required.");
+        }
         return next();
       }
 
-      const data = args[0] || {};
-      const actor = (socket as any).actor as SocketActor | undefined;
-      if (!actor) {
-        console.warn(`[SECURITY] Blocked unauthenticated socket event: ${event}`);
-        socket.emit("error", "Unauthorized: Join a workspace first.");
-        return next(new Error("Unauthorized"));
+      const actor = refreshSocketStaffActor(socket);
+      if (!actor) return rejectSocketEvent(socket, next, "Unauthorized: Join a workspace first.", true);
+      if (!TENANT_SOCKET_EVENTS.has(event)) {
+        return rejectSocketEvent(socket, next, "Unauthorized: Unsupported socket event.");
       }
-      if (data && data.tenantId) {
-        if (!actor || actor.tenantId !== data.tenantId) {
-          console.warn(`[SECURITY] Blocked unauthorized socket event: ${event} for tenant ${data.tenantId}`);
-          socket.emit("error", "Unauthorized: You do not have access to this tenant.");
-          return next(new Error("Unauthorized"));
+      const tenantId = typeof data.tenantId === "string" ? data.tenantId : "";
+      const postIdInPayload = typeof data.post?.id === "string" ? data.post.id : typeof data.postId === "string" ? data.postId : undefined;
+      if (actor.kind === "share" || actor.kind === "share-set") {
+        if (!revalidateSocketShareActor(socket, actor, postIdInPayload)) return next(new Error("Unauthorized"));
+      }
+      if (!tenantId) return rejectSocketEvent(socket, next, "Unauthorized: A tenant is required.");
+      if (actor.tenantId !== tenantId) {
+        return rejectSocketEvent(socket, next, "Unauthorized: You do not have access to this tenant.");
+      }
+      if (actorIsClientLike(actor) && postIdInPayload) {
+        const clientPost = db.prepare("SELECT clientStatus, archivedAt FROM posts WHERE id = ? AND tenantId = ?").get(postIdInPayload, tenantId) as { clientStatus: string; archivedAt: string | null } | undefined;
+        if (!clientPost || clientPost.archivedAt || (actor.kind === "client" && !isPostVisibleOnClientLink(clientPost))) {
+          return rejectSocketEvent(socket, next, "Unauthorized: This post is not available on the client link.");
         }
-        const postIdInPayload = data.post?.id ?? data.postId;
-        if (!actorAllowsPost(actor, postIdInPayload)) {
-          console.warn(`[SECURITY] Blocked share-scoped socket event: ${event} for wrong post`);
-          socket.emit("error", "Unauthorized: This action is not allowed from this review link.");
-          return next(new Error("Unauthorized"));
-        }
-        if (actorIsClientLike(actor) && !CLIENT_SAFE_EVENTS.has(event)) {
-          console.warn(`[SECURITY] Blocked client-unsafe socket event: ${event}`);
-          socket.emit("error", "Unauthorized: Clients cannot perform this action.");
-          return next(new Error("Unauthorized"));
-        }
-        if ((event === "create-post" || event === "create-posts-bulk" || event === "delete-post") && !actorCanCreate(actor)) {
-          socket.emit("error", "Unauthorized: Insufficient permissions.");
-          return next(new Error("Unauthorized"));
-        }
-        if (event === "update-post" && !actorCanUpdatePost(actor)) {
-          socket.emit("error", "Unauthorized: Insufficient permissions.");
-          return next(new Error("Unauthorized"));
-        }
-        if ((event === "add-task" || event === "delete-task" || event === "toggle-task") && !actorCanMutateTasks(actor)) {
-          socket.emit("error", "Unauthorized: Insufficient permissions.");
-          return next(new Error("Unauthorized"));
-        }
-        if (event === "delete-comment" && !actorCanDeleteComment(actor)) {
-          socket.emit("error", "Unauthorized: Insufficient permissions.");
-          return next(new Error("Unauthorized"));
-        }
+      }
+      if (!actorAllowsPost(actor, postIdInPayload)) {
+        return rejectSocketEvent(socket, next, "Unauthorized: This action is not allowed from this review link.");
+      }
+      if (actorIsClientLike(actor) && !CLIENT_SAFE_EVENTS.has(event)) {
+        return rejectSocketEvent(socket, next, "Unauthorized: Clients cannot perform this action.");
+      }
+      if ((event === "create-post" || event === "create-posts-bulk" || event === "delete-post") && !actorCanCreate(actor)) {
+        return rejectSocketEvent(socket, next, "Unauthorized: Insufficient permissions.");
+      }
+      if (event === "update-post" && !actorCanUpdatePost(actor)) {
+        return rejectSocketEvent(socket, next, "Unauthorized: Insufficient permissions.");
+      }
+      if ((event === "add-task" || event === "delete-task" || event === "toggle-task") && !actorCanMutateTasks(actor)) {
+        return rejectSocketEvent(socket, next, "Unauthorized: Insufficient permissions.");
+      }
+      if (event === "delete-comment" && !actorCanDeleteComment(actor)) {
+        return rejectSocketEvent(socket, next, "Unauthorized: Insufficient permissions.");
       }
       next();
     });
 
     socket.on("join-tenant", (payload: string | { tenantId: string; mode?: string; token?: string }) => {
-      const tenantId = typeof payload === "string" ? payload : payload.tenantId;
-      const mode = typeof payload === "string" ? "internal" : (payload.mode ?? "internal");
-      const passedToken = typeof payload === "string" ? "" : (payload.token || "");
+      if ((socket as any).actor) {
+        socket.disconnect(true);
+        return;
+      }
+      const tenantId = typeof payload === "string" ? payload : payload?.tenantId;
+      const mode = typeof payload === "string" ? "internal" : (payload?.mode ?? "internal");
+      const passedToken = typeof payload === "string" ? "" : String(payload?.token || "");
+      if (typeof tenantId !== "string" || !tenantId) {
+        socket.emit("error", "Workspace not found.");
+        return;
+      }
       const internalRoom = `${tenantId}:internal`;
       const clientRoom = `${tenantId}:client`;
 
       let tenant = db.prepare("SELECT * FROM tenants WHERE id = ?").get(tenantId) as any;
       if (tenant) {
-        let settings = JSON.parse(tenant.settings || "{}");
+        const settings = tenantAuthSettings(tenant.settings);
         if (!settings.clientToken || !settings.internalToken) {
           settings.clientToken = settings.clientToken || randomUUID();
           settings.internalToken = settings.internalToken || randomUUID();
@@ -2350,18 +2806,17 @@ async function startServer() {
         }
       }
 
-      const parsedTenant = tenant ? { ...tenant, settings: JSON.parse(tenant.settings || "{}") } : null;
+      const parsedTenant = tenant ? { ...tenant, settings: tenantAuthSettings(tenant.settings) } : null;
       if (!parsedTenant) {
         socket.emit("error", "Workspace not found.");
         return;
       }
 
       if (mode === "client") {
-        if (parsedTenant && passedToken !== parsedTenant.settings.clientToken) {
+        if (passedToken !== parsedTenant.settings.clientToken) {
           socket.emit("error", "Invalid or missing secure Client Token.");
           return;
         }
-        // Update lastActive
         const now = new Date().toISOString();
         db.prepare("UPDATE tenants SET lastActive = ? WHERE id = ?").run(now, tenantId);
         io.emit("tenant-updated", tenantPublic({ ...parsedTenant, lastActive: now }));
@@ -2370,22 +2825,25 @@ async function startServer() {
         socket.join(clientRoom);
         socket.emit("initial-data", { posts: getClientPosts(tenantId), tenant: tenantPublic({ ...parsedTenant, lastActive: now }) });
       } else {
-        const handshakeToken =
-          typeof (socket as any).handshake?.auth?.token === "string"
-            ? String((socket as any).handshake.auth.token)
-            : "";
-        const staffSession = getSession(passedToken) || getSession(handshakeToken);
-        if (parsedTenant && !staffSession && passedToken !== parsedTenant.settings.internalToken) {
+        const handshakeSession = getSocketSession(socket);
+        const payloadSession = !handshakeToken && passedToken ? getSession(passedToken) : null;
+        const staffSession = handshakeSession || payloadSession;
+        const boundSessionToken = handshakeSession ? handshakeToken : passedToken;
+        if (staffSession && !canAccessTenant(db, staffSession.userId, staffSession.role, tenantId)) {
+          socket.emit("error", "Unauthorized: You do not have access to this tenant.");
+          return;
+        }
+        if (!staffSession && passedToken !== parsedTenant.settings.internalToken) {
           socket.emit("error", "Invalid or missing secure Internal Token.");
           return;
         }
-        // Update lastActive for internal join too
+        if (staffSession) (socket as any).sessionToken = boundSessionToken;
         const now = new Date().toISOString();
         db.prepare("UPDATE tenants SET lastActive = ? WHERE id = ?").run(now, tenantId);
         io.emit("tenant-updated", tenantPublic({ ...parsedTenant, lastActive: now }));
 
         (socket as any).actor = staffSession
-          ? ({ kind: "staff", tenantId, role: staffSession.role } as SocketActor)
+          ? ({ kind: "staff", tenantId, userId: staffSession.userId, username: staffSession.username, sessionToken: boundSessionToken, role: staffSession.role } as SocketActor)
           : ({ kind: "magic-internal", tenantId, role: "graphic-designer" } as SocketActor);
         socket.join(tenantId);
         socket.join(internalRoom);
@@ -2394,18 +2852,23 @@ async function startServer() {
     });
 
     socket.on("join-post-share", (payload: { shareToken?: string }) => {
+      if ((socket as any).actor) {
+        socket.disconnect(true);
+        return;
+      }
       const shareToken = (payload?.shareToken || "").trim();
       if (!shareToken) {
         socket.emit("error", "Missing review link token.");
         return;
       }
       const now = new Date().toISOString();
+      const shareTokenHash = hashShareToken(shareToken);
       const row = db.prepare(`
-        SELECT s.tenantId, s.postId, s.token
+        SELECT s.tenantId, s.postId, s.tokenHash
         FROM post_client_shares s
         JOIN posts p ON p.id = s.postId AND p.tenantId = s.tenantId
-        WHERE s.token = ? AND s.revoked = 0 AND (s.expiresAt IS NULL OR s.expiresAt > ?)
-      `).get(shareToken, now) as { tenantId: string; postId: string; token: string } | undefined;
+        WHERE s.tokenHash = ? AND s.revoked = 0 AND (s.expiresAt IS NULL OR s.expiresAt > ?)
+      `).get(shareTokenHash, now) as { tenantId: string; postId: string; tokenHash: string } | undefined;
       if (!row) {
         socket.emit("error", "Invalid or expired review link.");
         return;
@@ -2423,24 +2886,29 @@ async function startServer() {
           // Never send workspace tokens to a single-post share viewer
         },
       };
-      (socket as any).shareScope = { tenantId: row.tenantId, postId: row.postId, shareToken: row.token };
-      (socket as any).actor = { kind: "share", tenantId: row.tenantId, postIds: [row.postId] } as SocketActor;
-      socket.join(`share:${row.token}`);
+      (socket as any).shareScope = { tenantId: row.tenantId, postId: row.postId, shareToken: row.tokenHash };
+      (socket as any).actor = { kind: "share", tenantId: row.tenantId, postIds: [row.postId], shareToken: row.tokenHash } as SocketActor;
+      socket.join(`share:${row.tokenHash}`);
       const strip = getPostStripForShare(row.tenantId, row.postId);
       const posts = strip ? [strip] : [];
       socket.emit("initial-data", { posts, tenant: tenantForClient, sharePostId: row.postId });
     });
 
     socket.on("join-share-set", (payload: { token?: string; shareSetToken?: string }) => {
+      if ((socket as any).actor) {
+        socket.disconnect(true);
+        return;
+      }
       const shareSetToken = (payload?.token || payload?.shareSetToken || "").trim();
       if (!shareSetToken) {
         socket.emit("error", "Missing share set token.");
         return;
       }
       const now = new Date().toISOString();
+      const shareSetTokenHash = hashShareToken(shareSetToken);
       const set = db.prepare(
-        "SELECT * FROM share_sets WHERE token = ? AND revoked = 0 AND (expiresAt IS NULL OR expiresAt > ?)"
-      ).get(shareSetToken, now) as any | undefined;
+        "SELECT id, tenantId, tokenHash FROM share_sets WHERE tokenHash = ? AND revoked = 0 AND (expiresAt IS NULL OR expiresAt > ?)"
+      ).get(shareSetTokenHash, now) as any | undefined;
       if (!set) {
         socket.emit("error", "Invalid, expired, or revoked share set link.");
         return;
@@ -2455,62 +2923,120 @@ async function startServer() {
         ...tenant,
         settings: { theme: parsed.theme },
       };
-      const postIds = db.prepare("SELECT postId FROM share_set_posts WHERE shareSetId = ?").all(set.id) as { postId: string }[];
+      const postIds = db.prepare(`
+        SELECT p.postId
+        FROM share_set_posts p
+        JOIN posts post ON post.id = p.postId AND post.tenantId = ?
+        WHERE p.shareSetId = ?
+      `).all(set.tenantId, set.id) as { postId: string }[];
       const ids = postIds.map((row) => row.postId);
       const posts = ids
         .map((postId) => getPostStripForShare(set.tenantId, postId))
         .filter((p) => p !== null);
-      (socket as any).shareScope = { tenantId: set.tenantId, postIds: ids, shareSetToken: set.token };
-      (socket as any).actor = { kind: "share-set", tenantId: set.tenantId, postIds: ids } as SocketActor;
-      socket.join(`share-set:${set.token}`);
+      (socket as any).shareScope = { tenantId: set.tenantId, postIds: ids, shareSetToken: set.tokenHash };
+      (socket as any).actor = { kind: "share-set", tenantId: set.tenantId, postIds: ids, shareToken: set.tokenHash } as SocketActor;
+      socket.join(`share-set:${set.tokenHash}`);
       socket.emit("initial-data", { posts, tenant: tenantForClient, shareSetId: set.id });
     });
 
     socket.on("create-post", (data: { tenantId: string; post: any }) => {
-      const { tenantId, post } = data;
-      const id = post.id || randomUUID();
-      const internalStatus = post.internalStatus || "Draft";
-      const clientStatus = deriveClientStatus(internalStatus, post.clientStatus);
+      const { tenantId, post } = data || {};
+      const validation = validatePostMutation(post, undefined, true);
+      if (!validation.ok) {
+        socket.emit("error", validation.error);
+        return;
+      }
+      const safePost = validation.value;
+      if (safePost.id) {
+        const otherPost = db.prepare("SELECT tenantId FROM posts WHERE id = ?").get(safePost.id) as { tenantId: string } | undefined;
+        if (otherPost) {
+          socket.emit("error", otherPost.tenantId === tenantId ? "Post already exists in this workspace." : "Post not found in this workspace.");
+          return;
+        }
+      }
+      const id = safePost.id || randomUUID();
+      const internalStatus = safePost.internalStatus || "Draft";
+      const clientStatus = deriveClientStatus(internalStatus, safePost.clientStatus);
       db.prepare(`INSERT INTO posts (id, tenantId, title, format, mediaUrls, caption, hashtags,
         date, time, clientStatus, internalStatus, assignee, campaignCode, contentPillar,
-        internalNotes, assetLineage, isBlocked, blockedReason, thumbnailUrl, revisionCount, dueDate, sortOrder) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-        .run(id, tenantId, post.title, post.format, JSON.stringify(post.mediaUrls || []),
-          post.caption || "", JSON.stringify(post.hashtags || []), post.date, post.time,
+        internalNotes, assetLineage, isBlocked, blockedReason, thumbnailUrl, revisionCount, dueDate, scheduledAt, sortOrder) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+        .run(id, tenantId, safePost.title, safePost.format, JSON.stringify(safePost.mediaUrls || []),
+          safePost.caption || "", JSON.stringify(safePost.hashtags || []), safePost.date, safePost.time,
           clientStatus, internalStatus,
-          post.assignee || "Unassigned", post.campaignCode || "", post.contentPillar || "",
-          post.internalNotes || "", post.assetLineage || "", post.isBlocked ? 1 : 0, post.blockedReason || null,
-          post.thumbnailUrl || null, 0, post.dueDate || null, post.sortOrder ?? nextSortOrder(tenantId));
-      logActivity(tenantId, "post-created", post.title, `New post created in ${post.internalStatus} status`);
-      io.to(tenantId).emit("activity", { action: "post-created", subject: post.title, tenantId, timestamp: new Date().toISOString() });
+          safePost.assignee || "Unassigned", safePost.campaignCode || "", safePost.contentPillar || "",
+          safePost.internalNotes || "", safePost.assetLineage || "", safePost.isBlocked ? 1 : 0, safePost.blockedReason || null,
+          safePost.thumbnailUrl || null, 0, safePost.dueDate || null, safePost.scheduledAt || null, safePost.sortOrder ?? nextSortOrder(tenantId));
+      logActivity(tenantId, "post-created", safePost.title, `New post created in ${internalStatus} status`);
+      io.to(tenantId).emit("activity", { action: "post-created", subject: safePost.title, tenantId, timestamp: new Date().toISOString() });
       broadcastPostCreated(tenantId, id);
     });
 
     socket.on("create-posts-bulk", (data: { tenantId: string; posts: any[] }) => {
-      const { tenantId, posts } = data;
+      const { tenantId, posts } = data || {};
+      if (!Array.isArray(posts) || posts.length < 1 || posts.length > MAX_BULK_POSTS) {
+        socket.emit("error", `Bulk posts must contain between 1 and ${MAX_BULK_POSTS} items`);
+        return;
+      }
+      const validatedPosts: Record<string, any>[] = [];
+      const seenIds = new Set<string>();
+      for (const post of posts) {
+        const validation = validatePostMutation(post, undefined, true);
+        if (!validation.ok) {
+          socket.emit("error", validation.error);
+          return;
+        }
+        const safePost = validation.value;
+        if (safePost.id && seenIds.has(safePost.id)) {
+          socket.emit("error", "Bulk posts must not contain duplicate ids");
+          return;
+        }
+        if (safePost.id) seenIds.add(safePost.id);
+        if (safePost.id) {
+          const otherPost = db.prepare("SELECT tenantId FROM posts WHERE id = ?").get(safePost.id) as { tenantId: string } | undefined;
+          if (otherPost) {
+            socket.emit("error", otherPost.tenantId === tenantId ? "Post already exists in this workspace." : "Post not found in this workspace.");
+            return;
+          }
+        }
+        validatedPosts.push(safePost);
+      }
       db.transaction(() => {
-        for (const post of posts) {
-          const id = post.id || randomUUID();
-          const internalStatus = post.internalStatus || "Draft";
-          const clientStatus = deriveClientStatus(internalStatus, post.clientStatus);
+        for (const safePost of validatedPosts) {
+          const id = safePost.id || randomUUID();
+          const internalStatus = safePost.internalStatus || "Draft";
+          const clientStatus = deriveClientStatus(internalStatus, safePost.clientStatus);
           db.prepare(`INSERT INTO posts (id, tenantId, title, format, mediaUrls, caption, hashtags,
             date, time, clientStatus, internalStatus, assignee, campaignCode, contentPillar,
-            internalNotes, assetLineage, isBlocked, blockedReason, thumbnailUrl, revisionCount, dueDate, sortOrder) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-            .run(id, tenantId, post.title, post.format, JSON.stringify(post.mediaUrls || []),
-              post.caption || "", JSON.stringify(post.hashtags || []), post.date, post.time,
+            internalNotes, assetLineage, isBlocked, blockedReason, thumbnailUrl, revisionCount, dueDate, scheduledAt, sortOrder) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+            .run(id, tenantId, safePost.title, safePost.format, JSON.stringify(safePost.mediaUrls || []),
+              safePost.caption || "", JSON.stringify(safePost.hashtags || []), safePost.date, safePost.time,
               clientStatus, internalStatus,
-              post.assignee || "Unassigned", post.campaignCode || "", post.contentPillar || "",
-              post.internalNotes || "", post.assetLineage || "", post.isBlocked ? 1 : 0, post.blockedReason || null,
-              post.thumbnailUrl || null, 0, post.dueDate || null, post.sortOrder ?? nextSortOrder(tenantId));
+              safePost.assignee || "Unassigned", safePost.campaignCode || "", safePost.contentPillar || "",
+              safePost.internalNotes || "", safePost.assetLineage || "", safePost.isBlocked ? 1 : 0, safePost.blockedReason || null,
+              safePost.thumbnailUrl || null, 0, safePost.dueDate || null, safePost.scheduledAt || null, safePost.sortOrder ?? nextSortOrder(tenantId));
         }
       })();
-      logActivity(tenantId, "bulk-upload", `${posts.length} posts`, `Bulk upload of ${posts.length} posts`);
-      io.to(tenantId).emit("activity", { action: "bulk-upload", subject: `${posts.length} posts`, tenantId, timestamp: new Date().toISOString() });
+      logActivity(tenantId, "bulk-upload", `${validatedPosts.length} posts`, `Bulk upload of ${validatedPosts.length} posts`);
+      io.to(tenantId).emit("activity", { action: "bulk-upload", subject: `${validatedPosts.length} posts`, tenantId, timestamp: new Date().toISOString() });
       broadcastInitialData(tenantId);
     });
 
     socket.on("update-post", (data: { tenantId: string; post: any }, ack?: (post: any) => void) => {
-      const { tenantId, post } = data;
-      if (!post.id) return;
+      const { tenantId, post: rawPost } = data || {};
+      if (!rawPost?.id) return;
+      const existingForValidation = db.prepare("SELECT * FROM posts WHERE id = ? AND tenantId = ?").get(rawPost.id, tenantId) as Record<string, any> | undefined;
+      if (!existingForValidation) {
+        socket.emit("error", "Post not found in this workspace.");
+        ack?.(null);
+        return;
+      }
+      const validation = validatePostMutation(rawPost, existingForValidation, false);
+      if (!validation.ok) {
+        socket.emit("error", validation.error);
+        ack?.(null);
+        return;
+      }
+      const post = validation.value;
 
       try {
         db.transaction(() => {
@@ -2533,15 +3059,20 @@ async function startServer() {
             }
           }
 
-          const clientStatus = deriveClientStatus(internalStatus, post.clientStatus, existing.clientStatus);
-          let revisionCount = existing.revisionCount || 0;
+           const clientStatus = deriveClientStatus(internalStatus, post.clientStatus, existing.clientStatus);
+           const nextScheduledAt = internalStatus === "Scheduled"
+             ? (post.scheduledAt !== undefined ? post.scheduledAt || null : existing.scheduledAt || null)
+             : (post.scheduledAt !== undefined ? post.scheduledAt || null : existing.internalStatus === "Scheduled" ? null : existing.scheduledAt || null);
+           let revisionCount = existing.revisionCount || 0;
+
           if (existing.internalStatus !== "Changes Requested" && internalStatus === "Changes Requested") {
             revisionCount++;
           }
 
           if (isClientSession) {
-            db.prepare(`UPDATE posts SET clientStatus=?, internalStatus=?, revisionCount=? WHERE id=? AND tenantId=?`)
-              .run(clientStatus, internalStatus, revisionCount, post.id, tenantId);
+             db.prepare(`UPDATE posts SET clientStatus=?, internalStatus=?, scheduledAt=?, revisionCount=? WHERE id=? AND tenantId=?`)
+               .run(clientStatus, internalStatus, nextScheduledAt, revisionCount, post.id, tenantId);
+
           } else {
           const parseJsonArr = (v: any) => {
             if (Array.isArray(v)) return v;
@@ -2571,7 +3102,7 @@ async function startServer() {
               (post.isBlocked ?? existing.isBlocked) ? 1 : 0,
               post.blockedReason ?? existing.blockedReason ?? null,
               post.thumbnailUrl !== undefined ? (post.thumbnailUrl || null) : (existing.thumbnailUrl || null),
-              post.scheduledAt !== undefined ? (post.scheduledAt || null) : (existing.scheduledAt || null),
+              nextScheduledAt,
               post.archivedAt !== undefined ? (post.archivedAt ?? null) : (existing.archivedAt ?? null),
               revisionCount,
               post.dueDate !== undefined ? (post.dueDate || null) : (existing.dueDate || null),
@@ -2607,27 +3138,36 @@ async function startServer() {
     socket.on("delete-post", (data: { tenantId: string; postId: string }) => {
       const { tenantId, postId } = data;
       try {
-        const shareTokens = getActiveShareTokensForPost(postId);
-        const p = db.prepare("SELECT title, mediaUrls, thumbnailUrl FROM posts WHERE id = ?").get(postId) as any;
-        if (p) {
-          // Clean up orphaned files from disk
-          try {
-            const urls = JSON.parse(p.mediaUrls || "[]");
-            urls.forEach(deleteAssetByUrl);
-            if (p.thumbnailUrl) deleteAssetByUrl(p.thumbnailUrl);
-          } catch (e) {
-            console.error("Error cleaning up assets:", e);
-          }
-          logActivity(tenantId, "post-deleted", p.title, "Post permanently deleted");
+        const post = db.prepare("SELECT title, mediaUrls, thumbnailUrl FROM posts WHERE id = ? AND tenantId = ?").get(postId, tenantId) as any;
+        if (!post) {
+          socket.emit("error", "Post not found in this workspace.");
+          return;
         }
-        db.prepare("UPDATE post_client_shares SET revoked = 1 WHERE postId = ?").run(postId);
-        for (const tkn of shareTokens) {
-          io.to(`share:${tkn}`).emit("post-deleted", postId);
+         const shareTokens = getActiveShareTokensForPost(postId);
+         const shareSetTokens = revokeShareSetsForPost(postId);
+         db.transaction(() => {
+
+          db.prepare("UPDATE post_client_shares SET revoked = 1 WHERE postId = ? AND tenantId = ?").run(postId, tenantId);
+          db.prepare("DELETE FROM posts WHERE id = ? AND tenantId = ?").run(postId, tenantId);
+          db.prepare("DELETE FROM comments WHERE postId = ?").run(postId);
+          db.prepare("DELETE FROM tasks WHERE postId = ?").run(postId);
+        })();
+        try {
+          const urls = JSON.parse(post.mediaUrls || "[]");
+          urls.forEach(deleteAssetByUrl);
+          if (post.thumbnailUrl) deleteAssetByUrl(post.thumbnailUrl);
+        } catch (e) {
+          console.error("Error cleaning up assets:", e);
         }
-        emitToShareSetRooms(io, postId, "post-deleted", postId);
-        db.prepare("DELETE FROM posts WHERE id = ? AND tenantId = ?").run(postId, tenantId);
-        db.prepare("DELETE FROM comments WHERE postId = ?").run(postId);
-        db.prepare("DELETE FROM tasks WHERE postId = ?").run(postId);
+        logActivity(tenantId, "post-deleted", post.title, "Post permanently deleted");
+        for (const token of shareTokens) {
+          io.to(`share:${token}`).emit("post-deleted", postId);
+          disconnectShareSockets(io, token, "share");
+        }
+        for (const token of shareSetTokens) {
+          io.to(`share-set:${token}`).emit("post-deleted", postId);
+          disconnectShareSockets(io, token, "share-set");
+        }
         io.to(tenantId).emit("post-deleted", postId);
         io.to(`${tenantId}:internal`).emit("post-deleted", postId);
         io.to(`${tenantId}:client`).emit("post-deleted", postId);
@@ -2638,22 +3178,38 @@ async function startServer() {
     });
 
     socket.on("add-comment", (data: { tenantId: string; postId: string; comment: any }) => {
-      const { tenantId, postId, comment } = data;
+      const { tenantId, postId, comment } = data || {};
+      const validation = validateCommentMutation(comment);
+      if (!validation.ok) {
+        socket.emit("error", validation.error);
+        return;
+      }
       try {
         const owned = db.prepare("SELECT id FROM posts WHERE id = ? AND tenantId = ?").get(postId, tenantId);
         if (!owned) {
           socket.emit("error", "Post not found in this workspace.");
           return;
         }
-        const id = comment.id || randomUUID();
+        const safeComment = validation.value;
         const actor = (socket as any).actor as SocketActor | undefined;
-        const clientLike = !!(actor && actorIsClientLike(actor));
+        const author = actor?.kind === "staff"
+          ? (actor.username || "Agency")
+          : actor?.kind === "share" || actor?.kind === "share-set"
+            ? "Reviewer"
+            : actor?.kind === "client"
+              ? "Client"
+              : "Agency";
+        const timestamp = new Date().toISOString();
+        const id = randomUUID();
+        const isClientActor = !actor || actorIsClientLike(actor);
+        const isInternalOnly = !isClientActor && safeComment.isInternalOnly;
         db.prepare("INSERT INTO comments (id, postId, author, text, timestamp, isInternalOnly, changeType, priority, slideIndex) VALUES (?,?,?,?,?,?,?,?,?)")
-          .run(id, postId, comment.author, comment.text, comment.timestamp || new Date().toISOString(),
-            clientLike ? 0 : (comment.isInternalOnly ? 1 : 0), comment.changeType || null, comment.priority || null, comment.slideIndex ?? null);
-        const post = db.prepare("SELECT title FROM posts WHERE id = ?").get(postId) as any;
-        logActivity(tenantId, "comment-added", post?.title || postId, `${comment.author} ${comment.isInternalOnly ? "(internal)" : "(client)"}: ${comment.text.substring(0, 60)}`);
-        io.to(tenantId).emit("activity", { action: "comment-added", subject: post?.title, detail: comment.text.substring(0, 60), tenantId, timestamp: new Date().toISOString() });
+          .run(id, postId, author, safeComment.text, timestamp,
+            isInternalOnly ? 1 : 0, safeComment.changeType, safeComment.priority, safeComment.slideIndex);
+        const post = db.prepare("SELECT title FROM posts WHERE id = ? AND tenantId = ?").get(postId, tenantId) as any;
+        const detail = `${author} ${isInternalOnly ? "(internal)" : "(client)"}: ${safeComment.text.substring(0, 60)}`;
+        logActivity(tenantId, "comment-added", post?.title || postId, detail);
+        io.to(tenantId).emit("activity", { action: "comment-added", subject: post?.title, detail, tenantId, timestamp });
         broadcastPostUpdated(tenantId, postId);
       } catch (err) {
         console.error("[CRITICAL] Add Comment Failed:", err);
@@ -2678,50 +3234,60 @@ async function startServer() {
     });
 
     socket.on("add-task", (data: { tenantId: string; postId: string; task: { text: string; completed?: boolean } }) => {
-      const { tenantId, postId, task } = data;
+      const { tenantId, postId, task } = data || {};
+      if (!task || typeof task.text !== "string" || !task.text.trim() || task.text.length > 500 || (task.completed !== undefined && typeof task.completed !== "boolean")) {
+        socket.emit("error", "Task text must be non-empty and at most 500 characters");
+        return;
+      }
       if (!postOwnedByTenant(postId, tenantId)) {
         socket.emit("error", "Post not found in this workspace.");
         return;
       }
       const id = randomUUID();
       db.prepare("INSERT INTO tasks (id, postId, text, completed) VALUES (?,?,?,?)")
-        .run(id, postId, task.text, task.completed ? 1 : 0);
+        .run(id, postId, task.text.trim(), task.completed ? 1 : 0);
       broadcastPostUpdated(tenantId, postId);
     });
 
     socket.on("delete-task", (data: { tenantId: string; postId: string; taskId: string }) => {
       const { tenantId, postId, taskId } = data;
       const owned = db.prepare(`
-        SELECT t.id FROM tasks t JOIN posts p ON p.id = t.postId WHERE t.id = ? AND p.tenantId = ?
-      `).get(taskId, tenantId);
+        SELECT t.id FROM tasks t JOIN posts p ON p.id = t.postId
+        WHERE t.id = ? AND t.postId = ? AND p.tenantId = ?
+      `).get(taskId, postId, tenantId);
       if (!owned) {
         socket.emit("error", "Task not found in this workspace.");
         return;
       }
-      db.prepare("DELETE FROM tasks WHERE id = ?").run(taskId);
+      db.prepare("DELETE FROM tasks WHERE id = ? AND postId = ?").run(taskId, postId);
       broadcastPostUpdated(tenantId, postId);
     });
 
     socket.on("toggle-task", (data: { tenantId: string; postId: string; taskId: string; completed: boolean }) => {
       const { tenantId, postId, taskId, completed } = data;
       const owned = db.prepare(`
-        SELECT t.id FROM tasks t JOIN posts p ON p.id = t.postId WHERE t.id = ? AND p.tenantId = ?
-      `).get(taskId, tenantId);
+        SELECT t.id FROM tasks t JOIN posts p ON p.id = t.postId
+        WHERE t.id = ? AND t.postId = ? AND p.tenantId = ?
+      `).get(taskId, postId, tenantId);
       if (!owned) {
         socket.emit("error", "Task not found in this workspace.");
         return;
       }
-      db.prepare("UPDATE tasks SET completed = ? WHERE id = ?").run(completed ? 1 : 0, taskId);
+      db.prepare("UPDATE tasks SET completed = ? WHERE id = ? AND postId = ?").run(completed ? 1 : 0, taskId, postId);
       broadcastPostUpdated(tenantId, postId);
     });
 
-    socket.on("upsert-tenant", (data: { tenant: any, adminToken: string }, callback?: (res: { success: boolean, error?: string }) => void) => {
-      const session = getSession(data.adminToken);
+    socket.on("upsert-tenant", (data: { tenant: any, adminToken?: string }, callback?: (res: { success: boolean, error?: string }) => void) => {
+      const session = getSocketSession(socket);
       if (!session || session.role !== "super-admin") {
         callback?.({ success: false, error: "Unauthorized: Super-admin access required." });
         return;
       }
-      const tenant = data.tenant;
+      const tenant = data?.tenant;
+      if (!tenant || !tenant.id) {
+        callback?.({ success: false, error: "Tenant id is required." });
+        return;
+      }
       tenant.name = String(tenant.name || "").trim();
       try {
         const existing = db.prepare("SELECT id, settings FROM tenants WHERE id = ?").get(tenant.id) as { id: string; settings: any } | undefined;
@@ -2742,13 +3308,18 @@ async function startServer() {
     });
 
     // ── Campaign CRUD ─────────────────────────────────────
-    socket.on("create-campaign", (data: { tenantId: string; campaign: any; adminToken: string }, callback?: (result: { success: boolean; campaign?: any; error?: string }) => void) => {
-      const s = getSession(data.adminToken);
-      if (!s || s.role === "user") {
+    socket.on("create-campaign", (data: { tenantId: string; campaign: any; adminToken?: string }, callback?: (result: { success: boolean; campaign?: any; error?: string }) => void) => {
+      const session = getSocketSession(socket);
+      const actor = (socket as any).actor as SocketActor | undefined;
+      if ((!session && actor?.kind !== "magic-internal") || session?.role === "user") {
         callback?.({ success: false, error: "You are not permitted to manage campaigns." });
         return;
       }
-      const { tenantId, campaign } = data;
+      const { tenantId, campaign } = data || {};
+      if (!tenantId || !isValidCampaignInput(campaign)) {
+        callback?.({ success: false, error: "Campaign data is invalid." });
+        return;
+      }
       const id = randomUUID();
       db.prepare("INSERT INTO campaigns (id, tenantId, name, code, color, startDate, endDate, description, createdAt) VALUES (?,?,?,?,?,?,?,?,?)")
         .run(id, tenantId, campaign.name, campaign.code, campaign.color || "#6366f1",
@@ -2758,38 +3329,54 @@ async function startServer() {
       callback?.({ success: true, campaign: created });
     });
 
-    socket.on("update-campaign", (data: { tenantId: string; campaign: any; adminToken: string }) => {
-      const s = getSession(data.adminToken);
-      if (!s || s.role === "user") return;
-      const { campaign } = data;
-      db.prepare("UPDATE campaigns SET name=?, code=?, color=?, startDate=?, endDate=?, description=? WHERE id=?")
-        .run(campaign.name, campaign.code, campaign.color, campaign.startDate, campaign.endDate, campaign.description, campaign.id);
-      io.emit("campaign-updated", { action: "updated", campaign, tenantId: data.tenantId });
+    socket.on("update-campaign", (data: { tenantId: string; campaign: any; adminToken?: string }) => {
+      const session = getSocketSession(socket);
+      const actor = (socket as any).actor as SocketActor | undefined;
+      if ((!session && actor?.kind !== "magic-internal") || session?.role === "user") return;
+      const { tenantId, campaign } = data || {};
+      if (!tenantId || !campaign?.id || !isValidCampaignInput(campaign)) return;
+      const owned = db.prepare("SELECT id FROM campaigns WHERE id = ? AND tenantId = ?").get(campaign.id, tenantId);
+      if (!owned) return;
+      db.prepare("UPDATE campaigns SET name=?, code=?, color=?, startDate=?, endDate=?, description=? WHERE id=? AND tenantId=?")
+        .run(campaign.name, campaign.code, campaign.color, campaign.startDate, campaign.endDate, campaign.description, campaign.id, tenantId);
+      const updated = db.prepare("SELECT * FROM campaigns WHERE id = ? AND tenantId = ?").get(campaign.id, tenantId);
+      io.emit("campaign-updated", { action: "updated", campaign: updated, tenantId });
     });
 
-    socket.on("delete-campaign", (data: { tenantId: string; campaignId: string; adminToken: string }) => {
-      const s = getSession(data.adminToken);
-      if (!s || s.role === "user") return;
-      db.prepare("DELETE FROM campaigns WHERE id = ? AND tenantId = ?").run(data.campaignId, data.tenantId);
-      io.emit("campaign-updated", { action: "deleted", campaignId: data.campaignId, tenantId: data.tenantId });
+    socket.on("delete-campaign", (data: { tenantId: string; campaignId: string; adminToken?: string }) => {
+      const session = getSocketSession(socket);
+      const actor = (socket as any).actor as SocketActor | undefined;
+      if ((!session && actor?.kind !== "magic-internal") || session?.role === "user") return;
+      const { tenantId, campaignId } = data || {};
+      if (!tenantId || !campaignId) return;
+      const result = db.prepare("DELETE FROM campaigns WHERE id = ? AND tenantId = ?").run(campaignId, tenantId);
+      if (!result.changes) return;
+      io.emit("campaign-updated", { action: "deleted", campaignId, tenantId });
     });
 
     // ── Content Pillar CRUD ───────────────────────────────
-    socket.on("create-pillar", (data: { tenantId: string; pillar: any; adminToken: string }) => {
-      const s = getSession(data.adminToken);
-      if (!s || s.role === "user") return;
+    socket.on("create-pillar", (data: { tenantId: string; pillar: any; adminToken?: string }) => {
+      const session = getSocketSession(socket);
+      const actor = (socket as any).actor as SocketActor | undefined;
+      if ((!session && actor?.kind !== "magic-internal") || session?.role === "user") return;
+      const { tenantId, pillar } = data || {};
+      if (!tenantId || !isValidPillarInput(pillar)) return;
       const id = randomUUID();
       db.prepare("INSERT INTO content_pillars (id, tenantId, name, color) VALUES (?,?,?,?)")
-        .run(id, data.tenantId, data.pillar.name, data.pillar.color || "#6366f1");
-      const created = db.prepare("SELECT * FROM content_pillars WHERE id = ?").get(id);
-      io.emit("pillar-updated", { action: "created", pillar: created, tenantId: data.tenantId });
+        .run(id, tenantId, pillar.name, pillar.color || "#6366f1");
+      const created = db.prepare("SELECT * FROM content_pillars WHERE id = ? AND tenantId = ?").get(id, tenantId);
+      io.emit("pillar-updated", { action: "created", pillar: created, tenantId });
     });
 
-    socket.on("delete-pillar", (data: { tenantId: string; pillarId: string; adminToken: string }) => {
-      const s = getSession(data.adminToken);
-      if (!s || s.role === "user") return;
-      db.prepare("DELETE FROM content_pillars WHERE id = ? AND tenantId = ?").run(data.pillarId, data.tenantId);
-      io.emit("pillar-updated", { action: "deleted", pillarId: data.pillarId, tenantId: data.tenantId });
+    socket.on("delete-pillar", (data: { tenantId: string; pillarId: string; adminToken?: string }) => {
+      const session = getSocketSession(socket);
+      const actor = (socket as any).actor as SocketActor | undefined;
+      if ((!session && actor?.kind !== "magic-internal") || session?.role === "user") return;
+      const { tenantId, pillarId } = data || {};
+      if (!tenantId || !pillarId) return;
+      const result = db.prepare("DELETE FROM content_pillars WHERE id = ? AND tenantId = ?").run(pillarId, tenantId);
+      if (!result.changes) return;
+      io.emit("pillar-updated", { action: "deleted", pillarId, tenantId });
     });
 
     socket.on("disconnect", () => console.log("Client disconnected:", socket.id));
