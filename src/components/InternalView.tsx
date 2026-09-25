@@ -597,10 +597,52 @@ export default function InternalView({
 
    const currentTenant = tenants.find((tenant) => tenant.id === _tenantId) || null;
 
-   return (
-    <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+    return (
+      <div className="rr-agency flex min-h-screen bg-zinc-950 text-white">
+        <aside className="hidden w-[72px] shrink-0 flex-col items-center border-r border-zinc-800/80 bg-zinc-950 py-4 lg:flex" aria-label="Agency navigation">
+          <button onClick={() => _onSwitchTenant("")} className="mb-6 rounded-xl p-2 text-blue-400 transition-colors hover:bg-blue-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" aria-label="Open command center" title="Command center">
+            <OsirisLogo size={28} />
+          </button>
+          <nav className="flex flex-1 flex-col items-center gap-2">
+            {[
+              { id: "grid" as const, label: "Workflow", Icon: Grid3X3 },
+              { id: "calendar" as const, label: "Calendar", Icon: Calendar },
+              { id: "analytics" as const, label: "Analytics", Icon: BarChart2 },
+            ].map(({ id, label, Icon }) => (
+              <button
+                key={id}
+                onClick={() => { setViewMode(id); setShowGlobalOverview(false); }}
+                className={`group relative flex h-11 w-11 items-center justify-center rounded-xl transition-colors ${viewMode === id && !showGlobalOverview ? "bg-blue-600 text-white" : "text-zinc-500 hover:bg-zinc-900 hover:text-zinc-100"}`}
+                aria-label={label}
+                title={label}
+                aria-pressed={viewMode === id && !showGlobalOverview}
+              >
+                <Icon className="h-5 w-5" />
+                <span className="pointer-events-none absolute left-14 z-50 hidden rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-[10px] font-semibold text-zinc-100 shadow-lg group-hover:block">{label}</span>
+              </button>
+            ))}
+            <div className="my-2 h-px w-7 bg-zinc-800" />
+            <button onClick={() => setShowCampaignModal(true)} className="group relative flex h-11 w-11 items-center justify-center rounded-xl text-zinc-500 transition-colors hover:bg-zinc-900 hover:text-zinc-100" aria-label="Campaigns" title="Campaigns">
+              <Flag className="h-5 w-5" />
+              <span className="pointer-events-none absolute left-14 z-50 hidden rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-[10px] font-semibold text-zinc-100 shadow-lg group-hover:block">Campaigns</span>
+            </button>
+            <button onClick={() => setShowUpdatesModal(true)} className="group relative flex h-11 w-11 items-center justify-center rounded-xl text-zinc-500 transition-colors hover:bg-zinc-900 hover:text-zinc-100" aria-label="What's new" title="What's new">
+              <Megaphone className="h-5 w-5" />
+              {unreadUpdates > 0 && <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-red-500" />}
+              <span className="pointer-events-none absolute left-14 z-50 hidden rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-[10px] font-semibold text-zinc-100 shadow-lg group-hover:block">What's new</span>
+            </button>
+          </nav>
+          <button onClick={toggleTheme} className="flex h-11 w-11 items-center justify-center rounded-xl text-zinc-500 transition-colors hover:bg-zinc-900 hover:text-zinc-100" aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} title="Toggle theme">
+            {theme === "dark" ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+          </button>
+          <div className="mt-3 flex h-9 w-9 items-center justify-center rounded-full border border-zinc-700 bg-zinc-800 text-[10px] font-bold text-zinc-200" title={currentUser?.username || "Agency"}>
+            {(currentUser?.username || "YK").slice(0, 2).toUpperCase()}
+          </div>
+        </aside>
+        <div className="min-w-0 flex-1">
+      <div className="mx-auto max-w-[1800px] px-4 py-4 sm:px-6 sm:py-5 lg:px-7">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-8 sm:mb-10">
+      <div className="mb-4 flex flex-col justify-between gap-4 md:flex-row md:items-end">
         <div className="space-y-1">
           <div className="flex items-center gap-3 text-zinc-400 text-sm font-medium mb-1">
             <OsirisLogo size={18} className="shrink-0" />
@@ -615,7 +657,7 @@ export default function InternalView({
             <div className="relative">
               <button
                 onClick={() => setClientSwitcherOpen((o) => !o)}
-                className="flex items-center gap-1.5 text-white font-bold hover:text-indigo-300 transition-colors group"
+                className="flex items-center gap-1.5 text-white font-bold hover:text-blue-300 transition-colors group"
               >
                 <span>{brandName || _tenantId}</span>
                 <ChevronDown className={`w-4 h-4 transition-transform ${clientSwitcherOpen ? "rotate-180" : ""}`} />
@@ -638,7 +680,7 @@ export default function InternalView({
                             _onSwitchTenant(t.id, "internal", internalToken);
                             setClientSwitcherOpen(false);
                           }}
-                          className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors ${isCurrent ? "bg-indigo-50 text-indigo-700" : "hover:bg-zinc-50 text-zinc-700"}`}
+                          className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors ${isCurrent ? "bg-blue-50 text-blue-700" : "hover:bg-zinc-50 text-zinc-700"}`}
                         >
                           {t.logoUrl ? (
                             <img src={t.logoUrl} alt={`${t.name} logo`} className="w-7 h-7 rounded-lg object-cover border border-zinc-200" onError={(e) => { e.currentTarget.style.display = "none"; }} />
@@ -646,7 +688,7 @@ export default function InternalView({
                             <div className="w-7 h-7 rounded-lg bg-zinc-200 flex items-center justify-center text-[10px] font-bold text-zinc-500">{t.name?.charAt(0) || "?"}</div>
                           )}
                           <span className="font-semibold text-sm truncate flex-1">{t.name || t.id}</span>
-                          {isCurrent && <CheckCircle2 className="w-4 h-4 text-indigo-500 shrink-0" />}
+                          {isCurrent && <CheckCircle2 className="w-4 h-4 text-blue-500 shrink-0" />}
                         </button>
                       );
                     })}
@@ -664,8 +706,6 @@ export default function InternalView({
               )}
             </div>
           </div>
-          <h1 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">Review Room</h1>
-          <p className="text-xs text-zinc-500 font-medium pt-0.5">Press <kbd className="bg-zinc-800 px-1.5 py-0.5 rounded text-zinc-300 font-mono">J</kbd>/<kbd className="bg-zinc-800 px-1.5 py-0.5 rounded text-zinc-300 font-mono">K</kbd> to navigate{canCreate ? <> · <kbd className="bg-zinc-800 px-1.5 py-0.5 rounded text-zinc-300 font-mono">E</kbd> edit</> : null} · <kbd className="bg-zinc-800 px-1.5 py-0.5 rounded text-zinc-300 font-mono">Esc</kbd> close</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 sm:gap-3">
@@ -692,18 +732,18 @@ export default function InternalView({
             </button>
           </div>
           <div className="relative group flex-1 sm:flex-none sm:min-w-[220px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400 group-focus-within:text-indigo-500 transition-colors" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400 group-focus-within:text-blue-500 transition-colors" />
             <input
               type="text"
               placeholder="Search posts, campaigns..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 bg-white border border-zinc-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all shadow-sm"
+              className="w-full pl-10 pr-4 py-2.5 bg-white border border-zinc-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all shadow-sm"
             />
           </div>
           <button
              onClick={onPreviewClient}
-             className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-xl text-sm font-bold transition-all shadow-sm active:scale-95"
+             className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl text-sm font-bold transition-all shadow-sm active:scale-95"
              title="Preview the client-facing profile"
              aria-label="Preview client view"
           >
@@ -727,7 +767,7 @@ export default function InternalView({
             >
               <Megaphone className="w-4 h-4" />
               {unreadUpdates > 0 && (
-                <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-indigo-600 text-white text-[9px] font-black flex items-center justify-center">{unreadUpdates}</span>
+                <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-blue-600 text-white text-[9px] font-black flex items-center justify-center">{unreadUpdates}</span>
               )}
             </button>
           )}
@@ -751,14 +791,14 @@ export default function InternalView({
       {showGlobalOverview && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mb-10">
           <h2 className="text-xl font-bold text-zinc-900 mb-6 flex items-center gap-2">
-            <Layout className="w-5 h-5 text-indigo-500" /> Agency Global Overview
+            <Layout className="w-5 h-5 text-blue-500" /> Agency Global Overview
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             {globalStats.map((s: any) => (
               <div key={s.id} onClick={() => { _onSwitchTenant(s.id); setShowGlobalOverview(false); }}
-                className="group bg-white border border-zinc-200 p-5 rounded-2xl hover:border-indigo-400 hover:shadow-xl hover:shadow-indigo-500/5 transition-all cursor-pointer relative overflow-hidden">
+                className="group bg-white border border-zinc-200 p-5 rounded-2xl hover:border-blue-400 hover:shadow-xl hover:shadow-blue-500/5 transition-all cursor-pointer relative overflow-hidden">
                 <div className="absolute top-0 right-0 p-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <ChevronRight className="w-4 h-4 text-indigo-500" />
+                  <ChevronRight className="w-4 h-4 text-blue-500" />
                 </div>
                 <h3 className="font-bold text-zinc-900 mb-4">{s.name}</h3>
                 <div className="grid grid-cols-2 gap-3">
@@ -770,9 +810,9 @@ export default function InternalView({
                     <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Blocked</p>
                     <p className={`text-lg font-black ${s.blocked > 0 ? "text-red-600" : "text-zinc-900"}`}>{s.blocked}</p>
                   </div>
-                  <div className="bg-indigo-50 p-2 rounded-lg">
-                    <p className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest">Needs Review</p>
-                    <p className="text-lg font-black text-indigo-700">{s.needsReview}</p>
+                  <div className="bg-blue-50 p-2 rounded-lg">
+                    <p className="text-[10px] font-bold text-blue-400 uppercase tracking-widest">Needs Review</p>
+                    <p className="text-lg font-black text-blue-700">{s.needsReview}</p>
                   </div>
                   <div className="bg-emerald-50 p-2 rounded-lg">
                     <p className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">Approved</p>
@@ -787,7 +827,7 @@ export default function InternalView({
 
       {/* Calendar View */}
       {viewMode === "calendar" && !showGlobalOverview && (
-        <div className="mb-8">
+        <div className="rr-operations-surface mb-8">
           <CalendarView
             posts={filteredPosts}
             onOpenPost={(post) => setActivePostId(post.id)}
@@ -805,7 +845,7 @@ export default function InternalView({
 
       {/* Analytics View */}
       {viewMode === "analytics" && !showGlobalOverview && (
-        <div className="mb-8">
+        <div className="rr-operations-surface mb-8">
           <Suspense fallback={<div role="status" className="rounded-2xl border border-zinc-200 bg-white p-8 text-sm text-zinc-500">Loading analytics…</div>}>
             <AnalyticsView tenantId={_tenantId} adminToken={adminToken} brandName={brandName} />
           </Suspense>
@@ -813,7 +853,7 @@ export default function InternalView({
       )}
 
       {/* Tabs & Stats */}
-      {viewMode === "grid" && (<div className="mb-8">
+      {viewMode === "grid" && (<div className="rr-board mb-8">
         <div className="flex flex-wrap items-center gap-2 mb-6">
           <div className="flex items-center gap-1 bg-zinc-100 p-1 rounded-2xl">
             {[
@@ -835,10 +875,10 @@ export default function InternalView({
           {uniqueCampaigns.length > 0 && (
             <div className="flex items-center gap-1 flex-wrap">
               <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest ml-1">Campaign:</span>
-              <button onClick={() => setCampaignFilter("")} className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all ${!campaignFilter ? "bg-indigo-600 text-white" : "bg-zinc-100 text-zinc-500 hover:text-zinc-800"}`}>All</button>
+              <button onClick={() => setCampaignFilter("")} className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all ${!campaignFilter ? "bg-blue-600 text-white" : "bg-zinc-100 text-zinc-500 hover:text-zinc-800"}`}>All</button>
               {uniqueCampaigns.map(code => (
                 <button key={code} onClick={() => setCampaignFilter(campaignFilter === code ? "" : code)}
-                  className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all ${campaignFilter === code ? "bg-indigo-600 text-white" : "bg-zinc-100 text-zinc-500 hover:text-zinc-800"}`}>
+                  className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all ${campaignFilter === code ? "bg-blue-600 text-white" : "bg-zinc-100 text-zinc-500 hover:text-zinc-800"}`}>
                   {code}
                 </button>
               ))}
@@ -850,7 +890,7 @@ export default function InternalView({
         <div className="flex flex-wrap items-center gap-3 sm:gap-6 mb-4 sm:mb-5 px-1" id="stats-bar">
           {[
              { label: "Total Posts", value: stats.total, color: "text-zinc-900" },
-             { label: "Needs review", value: stats.needsReview, color: "text-indigo-600" },
+             { label: "Needs review", value: stats.needsReview, color: "text-blue-600" },
              { label: "Blocked Assets", value: stats.blocked, color: "text-red-600" },
           ].map((s) => (
             <div key={s.label} className="flex items-center gap-1.5 sm:gap-2">
@@ -863,13 +903,13 @@ export default function InternalView({
               <>
                 <button
                   onClick={() => setShowBatchModal(true)}
-                  className="flex items-center gap-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-bold transition-all whitespace-nowrap h-9"
+                  className="flex items-center gap-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-bold transition-all whitespace-nowrap h-9"
                 >
                   <Zap className="w-3.5 h-3.5" /> Bulk Upload
                 </button>
                 <button
                   onClick={() => { setEditingPost(null); setCalendarDraftDate(undefined); setShowFormModal(true); }}
-                  className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition-all shadow-lg shadow-indigo-100 h-9"
+                  className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition-all shadow-lg shadow-blue-100 h-9"
                 >
                   <Plus className="w-4 h-4" /> New Post
                 </button>
@@ -896,13 +936,14 @@ export default function InternalView({
             return (
             <div
               key={col.id}
-              className={`${activeTab === "blocked" ? "w-full max-w-xl" : "w-[240px] sm:w-[260px]"} shrink-0 bg-zinc-50/90 rounded-2xl border border-zinc-100 p-2 min-h-[36vh] snap-start`}
+              className={`${activeTab === "blocked" ? "w-full max-w-xl" : "w-[220px] sm:w-[230px]"} shrink-0 rounded-xl border border-zinc-800 bg-zinc-900/80 p-2 min-h-[40vh] snap-start`}
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => { e.preventDefault(); handleColumnDrop(col.id); }}
             >
-              <div className="flex items-center justify-between px-2 py-2 mb-1">
-                <h3 className="text-[10px] font-black uppercase tracking-widest text-zinc-500">{col.label}</h3>
-                <span className="text-[10px] font-bold text-zinc-400">{colPosts.length}</span>
+              <div className="flex items-center gap-2 px-1.5 py-2">
+                <span className={`h-5 w-1 rounded-full ${col.id === "drafts" ? "bg-zinc-400" : col.id === "internal" ? "bg-amber-400" : col.id === "client" ? "bg-blue-500" : col.id === "changes" ? "bg-red-400" : "bg-emerald-500"}`} />
+                <h3 className="text-[10px] font-bold uppercase tracking-[0.16em] text-zinc-200">{col.label}</h3>
+                <span className="ml-auto text-[10px] font-semibold text-zinc-500">{colPosts.length}</span>
               </div>
               <div className="space-y-3 max-h-[calc(100vh-280px)] overflow-y-auto pr-0.5">
           {visible.map((post) => (
@@ -926,14 +967,14 @@ export default function InternalView({
                 setTimeout(() => { draggingIdRef.current = null; }, 80);
               }}
               onClick={() => openPost(post)}
-              className={`bg-white rounded-xl border-2 overflow-hidden shadow-sm transition-all cursor-pointer group flex flex-col relative ${selectedIds.has(post.id) ? "border-indigo-500 ring-4 ring-indigo-50" : "border-zinc-200 hover:shadow-md hover:border-zinc-300"} ${draggingId === post.id ? "opacity-60" : ""}`}
+              className={`overflow-hidden rounded-lg border bg-zinc-900 shadow-sm transition-[border-color,box-shadow,transform] duration-200 group relative flex cursor-pointer flex-col ${selectedIds.has(post.id) ? "border-blue-500 ring-2 ring-blue-500/20" : "border-zinc-800 hover:border-zinc-600"} ${draggingId === post.id ? "opacity-60" : ""}`}
             >
               {/* Checkbox */}
               <button
                 onClick={(e) => toggleSelect(post.id, e)}
-                className={`absolute top-3 left-3 z-20 w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all ${selectedIds.has(post.id)
-                  ? "bg-indigo-600 border-indigo-600 text-white"
-                  : "bg-white/80 backdrop-blur border-zinc-300 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 shadow-sm"
+                className={`absolute left-3 top-3 z-20 flex h-6 w-6 items-center justify-center rounded-md border transition-all ${selectedIds.has(post.id)
+                  ? "border-blue-600 bg-blue-600 text-white"
+                  : "border-white/50 bg-black/35 text-white opacity-100 backdrop-blur-sm sm:opacity-0 sm:group-hover:opacity-100"
                   }`}
                 aria-label={`Select ${post.title}`}
               >
@@ -984,10 +1025,11 @@ export default function InternalView({
 
                 {/* Carousel next-slide cycle */}
                 {post.mediaUrls.length > 1 && (
-                  <div className="absolute bottom-2 left-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                   <div className="absolute bottom-2 left-12 right-2 z-10 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
                     <div className="flex items-center gap-1.5 p-1 bg-black/40 backdrop-blur-md rounded-lg">
-                      <button
-                        onClick={(e) => {
+                       <button
+                         type="button"
+                         onClick={(e) => {
                           e.stopPropagation();
                           const currentThumb = post.thumbnailUrl || post.mediaUrls[0];
                           const currentIdx = post.mediaUrls.indexOf(currentThumb);
@@ -1006,29 +1048,30 @@ export default function InternalView({
                   <div className="absolute inset-0 bg-red-900/40 backdrop-blur-[2px] flex items-center justify-center pointer-events-none">
                     <div className="bg-white px-3 py-1.5 rounded-full text-red-700 text-xs font-bold uppercase tracking-wider shadow-lg flex items-center space-x-1.5 border border-red-100">
                       <AlertCircle className="w-3.5 h-3.5" /><span>Blocked</span>
-                    </div>
-                  </div>
-                )}
-              </div>
+                     </div>
+                   </div>
+                 )}
 
-              {/* Quick duplicate button */}
-              <button
-                onClick={(e) => { e.stopPropagation(); handleDuplicate(post); }}
-                className="absolute bottom-3 left-3 z-10 w-8 h-8 rounded-lg bg-white/95 backdrop-blur shadow-sm border border-zinc-200 flex items-center justify-center text-zinc-400 hover:text-indigo-600 transition-all opacity-0 group-hover:opacity-100 translate-y-2 group-hover:translate-y-0"
-                title="Duplicate"
-              >
-                <Copy className="w-4 h-4" />
-              </button>
+                 <button
+                   type="button"
+                   onClick={(e) => { e.stopPropagation(); handleDuplicate(post); }}
+                   className="absolute bottom-3 left-3 z-10 flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-200 bg-white/95 text-zinc-500 shadow-sm backdrop-blur transition-all hover:text-blue-600 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 max-sm:translate-y-0 max-sm:opacity-100 sm:translate-y-2 sm:opacity-0 sm:group-hover:translate-y-0 sm:group-hover:opacity-100"
+                   title="Duplicate"
+                 >
+                   <Copy className="w-4 h-4" />
+                 </button>
+               </div>
 
-              <div className="p-4 flex flex-col flex-1">
-                <h3 className="font-bold text-sm text-zinc-900 line-clamp-2 mb-2 leading-tight">{post.title}</h3>
-                <div className="mt-auto pt-2 border-t border-zinc-50 flex items-center justify-between gap-1">
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <Badge variant={statusVariant(post.internalStatus)} className="shrink-0">
+               <div className="flex flex-1 flex-col p-3">
+                <h3 className="mb-1 line-clamp-2 text-sm font-semibold leading-tight text-zinc-100">{post.title}</h3>
+                {post.caption && <p className="mb-3 line-clamp-2 text-xs leading-relaxed text-zinc-500">{post.caption}</p>}
+                 <div className="mt-auto flex flex-col items-stretch gap-2 border-t border-zinc-800 pt-2 sm:flex-row sm:items-center sm:justify-between sm:gap-1">
+                   <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                     <Badge variant={statusVariant(post.internalStatus)} className="shrink-0 max-w-[112px] truncate">
                       {post.internalStatus}
                     </Badge>
                     {post.campaignCode && (
-                      <span className="flex items-center gap-0.5 text-[9px] font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200 shrink-0 max-w-[90px] truncate" title={post.campaignCode}>
+                      <span className="flex items-center gap-0.5 text-[9px] font-bold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200 shrink-0 max-w-[90px] truncate" title={post.campaignCode}>
                         <Tag className="w-2.5 h-2.5" />{post.campaignCode}
                       </span>
                     )}
@@ -1038,7 +1081,7 @@ export default function InternalView({
                       </span>
                     )}
                     {post.dueDate && (
-                      <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border shrink-0 flex items-center gap-1 ${isOverdue(post.dueDate) && !["Approved", "Posted", "Scheduled"].includes(post.internalStatus) ? "border-red-300 text-red-600 bg-red-50" : "border-zinc-200 text-zinc-500 bg-zinc-50"}`}>
+                      <span className={`flex shrink-0 items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-semibold ${isOverdue(post.dueDate) && !["Approved", "Posted", "Scheduled"].includes(post.internalStatus) ? "border-red-900/50 bg-red-950/40 text-red-300" : "border-zinc-800 bg-zinc-950/60 text-zinc-400"}`}>
                         <Clock className="w-3 h-3" />{dateOnly(post.dueDate)}
                       </span>
                     )}
@@ -1048,7 +1091,7 @@ export default function InternalView({
                     value={post.date || ""}
                     onClick={(e) => e.stopPropagation()}
                     onChange={(e) => updatePostWithScheduling(post, { date: e.target.value })}
-                    className="text-[10px] sm:text-[11px] font-bold text-zinc-400 bg-transparent border-none p-0 w-[105px] cursor-pointer hover:text-indigo-600 focus:text-indigo-600 focus:ring-0 text-right opacity-70 hover:opacity-100 transition-all shrink-0"
+                      className="w-full shrink-0 cursor-pointer border-none bg-transparent p-0 text-left text-[10px] font-semibold text-zinc-500 opacity-80 transition-colors hover:text-blue-300 focus:text-blue-300 focus:ring-0 sm:w-[92px] sm:text-right sm:text-[11px]"
                     title="Edit Date"
                   />
                 </div>
@@ -1059,7 +1102,7 @@ export default function InternalView({
             <button
               type="button"
               onClick={() => setColShown((s) => ({ ...s, [col.id]: (s[col.id] ?? 12) + 12 }))}
-              className="w-full py-2 text-[10px] font-black uppercase tracking-widest text-indigo-600 hover:bg-indigo-50 rounded-lg"
+              className="w-full py-2 text-[10px] font-black uppercase tracking-widest text-blue-600 hover:bg-blue-50 rounded-lg"
             >
               Show more ({colPosts.length - visible.length})
             </button>
@@ -1078,7 +1121,7 @@ export default function InternalView({
               <span className="text-sm font-bold text-zinc-500">Archived Posts ({archivedPosts.length})</span>
             </div>
             {archivedPosts.length === 0 ? (
-              <div className="text-center py-20 text-zinc-400 bg-white rounded-3xl border border-zinc-100 shadow-sm">
+              <div className="rounded-2xl border border-zinc-200 bg-white px-6 py-16 text-center text-zinc-500 shadow-sm">
                 <Archive className="w-10 h-10 mx-auto mb-3 opacity-20" />
                 <p className="text-base font-medium">No archived posts</p>
                 <p className="text-sm mt-1">Archived posts will appear here.</p>
@@ -1093,7 +1136,7 @@ export default function InternalView({
                     className="bg-white rounded-xl border-2 border-zinc-200 overflow-hidden shadow-sm flex flex-col relative opacity-80 hover:opacity-100 transition-opacity cursor-pointer"
                   >
                     {/* Thumbnail */}
-                    <div className={`relative ${tileAspectClass(post.format)} bg-zinc-100 overflow-hidden shrink-0`}>
+              <div className={`relative ${tileAspectClass(post.format)} overflow-hidden bg-zinc-800 shrink-0`}>
                       {(post.thumbnailUrl || (post.mediaUrls && post.mediaUrls[0])) ? (
                         <img src={post.thumbnailUrl || post.mediaUrls[0]} alt={post.title} onError={(e) => { e.currentTarget.src = fallbackSvg; }} className="w-full h-full object-cover" />
                       ) : (
@@ -1116,7 +1159,7 @@ export default function InternalView({
                         <div className="flex items-center gap-1.5 min-w-0">
                           <Badge variant="neutral" className="shrink-0">{post.internalStatus}</Badge>
                           {post.campaignCode && (
-                            <span className="flex items-center gap-0.5 text-[9px] font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200 shrink-0 max-w-[90px] truncate" title={post.campaignCode}>
+                            <span className="flex max-w-[90px] shrink-0 items-center gap-0.5 truncate rounded border border-blue-900/60 bg-blue-950/60 px-1.5 py-0.5 text-[9px] font-semibold text-blue-300" title={post.campaignCode}>
                               <Tag className="w-2.5 h-2.5" />{post.campaignCode}
                             </span>
                           )}
@@ -1129,7 +1172,7 @@ export default function InternalView({
                             setActiveTab("workflow");
                             setActivePostId(post.id);
                           }}
-                          className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md bg-indigo-50 text-indigo-600 border border-indigo-200 hover:bg-indigo-100 transition-colors"
+                          className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md bg-blue-50 text-blue-600 border border-blue-200 hover:bg-blue-100 transition-colors"
                         >
                           <RotateCcw className="w-3 h-3 inline mr-1" /> Restore
                         </button>
@@ -1142,7 +1185,7 @@ export default function InternalView({
                 <button
                   type="button"
                   onClick={() => setListShown((n) => n + 24)}
-                  className="mt-4 w-full py-2.5 text-xs font-black uppercase tracking-widest text-indigo-600 hover:bg-indigo-50 rounded-xl border border-indigo-100"
+                  className="mt-4 w-full py-2.5 text-xs font-black uppercase tracking-widest text-blue-600 hover:bg-blue-50 rounded-xl border border-blue-100"
                 >
                   Show more ({archivedPosts.length - listShown})
                 </button>
@@ -1158,7 +1201,7 @@ export default function InternalView({
         {activePost && (
           <motion.div
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-zinc-950/80 backdrop-blur-sm"
+            className="fixed inset-0 z-[120] flex items-stretch justify-end bg-black/45 backdrop-blur-[2px]"
             onClick={() => setActivePostId(null)}
           >
              <motion.div
@@ -1170,11 +1213,11 @@ export default function InternalView({
                initial={{ scale: 0.95, opacity: 0, y: 20 }}
                animate={{ scale: 1, opacity: 1, y: 0 }}
                exit={{ scale: 0.95, opacity: 0, y: 20 }}
-               className="bg-white rounded-[32px] shadow-2xl w-full max-w-6xl h-[95vh] md:h-[min(95vh,900px)] overflow-hidden flex flex-col md:flex-row relative min-h-0"
+                className="relative flex h-full w-full max-w-[460px] flex-col overflow-hidden border-l border-blue-500/40 bg-zinc-950 shadow-2xl"
               onClick={(e) => e.stopPropagation()}
             >
               {/* Left: Media */}
-              <div className="w-full md:w-[42%] bg-zinc-900 flex flex-col relative overflow-hidden h-[45vh] md:h-full min-h-0">
+               <div className="relative flex h-[280px] w-full shrink-0 flex-col overflow-hidden bg-zinc-950">
                 {/* Overlay Header */}
                 <div className="absolute top-0 inset-x-0 p-4 z-40 flex items-center justify-between bg-gradient-to-b from-black/80 to-transparent">
                   <div className="flex items-center gap-2">
@@ -1213,14 +1256,14 @@ export default function InternalView({
                           onError={(e) => { (e.currentTarget.nextElementSibling as HTMLElement)?.classList.remove("hidden"); e.currentTarget.classList.add("hidden"); }}
                         />
                         {/* Video Actions overlay */}
-                        <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover/viewer:opacity-100 transition-opacity">
+                         <div className="absolute right-4 top-4 flex gap-2 opacity-100 transition-opacity sm:opacity-0 sm:group-hover/viewer:opacity-100">
                           <button 
                             onClick={handleCaptureFrame}
                             disabled={isCapturing}
                             className="bg-black/60 backdrop-blur-md hover:bg-black text-white p-2.5 rounded-xl shadow-xl border border-white/10 active:scale-95 transition-all flex items-center gap-2 group/btn"
                             title="Capture current frame as Post Cover"
                           >
-                            {isCapturing ? <Loader2 className="w-4 h-4 animate-spin text-indigo-400" /> : <Camera className="w-4 h-4 text-indigo-400 group-hover/btn:scale-110 transition-transform" />}
+                            {isCapturing ? <Loader2 className="w-4 h-4 animate-spin text-blue-400" /> : <Camera className="w-4 h-4 text-blue-400 group-hover/btn:scale-110 transition-transform" />}
                             <span className="text-[10px] font-black uppercase tracking-wider pr-1">Capture Frame</span>
                           </button>
                         </div>
@@ -1234,7 +1277,7 @@ export default function InternalView({
                           referrerPolicy="no-referrer"
                           onError={(e) => { e.currentTarget.src = fallbackSvg; }}
                         />
-                        <div className="absolute top-4 right-4 opacity-0 group-hover/viewer:opacity-100 transition-opacity">
+                         <div className="absolute right-4 top-4 opacity-100 transition-opacity sm:opacity-0 sm:group-hover/viewer:opacity-100">
                           <button
                             onClick={() => {
                               onUpdatePost({ ...activePost, thumbnailUrl: activePost.mediaUrls[activeImageIdx] });
@@ -1243,7 +1286,7 @@ export default function InternalView({
                             className="bg-black/60 backdrop-blur-md hover:bg-black text-white p-2.5 rounded-xl shadow-xl border border-white/10 active:scale-95 transition-all"
                             title="Set current image as Post Cover"
                           >
-                            <ImageIcon className="w-4 h-4 text-indigo-400" />
+                            <ImageIcon className="w-4 h-4 text-blue-400" />
                           </button>
                         </div>
                       </div>
@@ -1271,50 +1314,56 @@ export default function InternalView({
                 {/* Carousel mini-thumbnails */}
                 {activePost.mediaUrls.length > 1 && (
                   <div className="p-4 bg-zinc-950/40 backdrop-blur-md border-t border-white/5 flex gap-2 overflow-x-auto shrink-0 scrollbar-hide">
-                    {activePost.mediaUrls.map((url, i) => (
-                      <button
-                        key={i}
-                        onClick={() => setActiveImageIdx(i)}
-                        className={`w-14 h-14 rounded-lg overflow-hidden shrink-0 border-2 transition-all relative group/mini ${i === activeImageIdx ? "border-indigo-500 scale-105 shadow-lg" : "border-transparent opacity-60 hover:opacity-100"}`}
-                      >
-                        {shouldRenderAsVideo(url, activePost.format) ? (
-                          <div className="w-full h-full bg-zinc-800 flex items-center justify-center text-[8px] text-white font-bold tracking-tighter">VIDEO</div>
-                        ) : (
-                          <img src={url} alt="" onError={(e) => { e.currentTarget.src = fallbackSvg; }} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                        )}
+                     {activePost.mediaUrls.map((url, i) => (
+                       <div
+                         key={i}
+                         className={`group/mini relative h-14 w-14 shrink-0 overflow-hidden rounded-lg border-2 transition-all ${i === activeImageIdx ? "scale-105 border-blue-500 shadow-lg" : "border-transparent opacity-60 hover:opacity-100"}`}
+                       >
+                         <button
+                           type="button"
+                           onClick={() => setActiveImageIdx(i)}
+                           aria-label={`View media ${i + 1}`}
+                           className="absolute inset-0 h-full w-full"
+                         >
+                           {shouldRenderAsVideo(url, activePost.format) ? (
+                             <span className="flex h-full w-full items-center justify-center bg-zinc-800 text-[8px] font-bold tracking-tighter text-white">VIDEO</span>
+                           ) : (
+                             <img src={url} alt="" onError={(e) => { e.currentTarget.src = fallbackSvg; }} className="h-full w-full object-cover" referrerPolicy="no-referrer" />
+                           )}
+                         </button>
 
-                        {/* Set as cover from carousel mini */}
-                        {activePost.thumbnailUrl !== url && (
-                          <div className="absolute inset-0 bg-indigo-600/80 items-center justify-center hidden group-hover/mini:flex transition-all">
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onUpdatePost({ ...activePost, thumbnailUrl: url });
-                                success("Cover updated");
-                              }}
-                              className="p-1.5 bg-white text-indigo-600 rounded-full shadow-lg"
-                              title="Set as Cover"
-                            >
-                              <ImageIcon className="w-3 h-3" />
-                            </button>
-                          </div>
-                        )}
-                        {activePost.thumbnailUrl === url && (
-                          <div className="absolute top-0.5 right-0.5 w-2 h-2 bg-emerald-500 rounded-full border border-white shadow-sm" />
-                        )}
-                      </button>
-                    ))}
+                         {activePost.thumbnailUrl !== url && (
+                           <button
+                             type="button"
+                             onClick={() => {
+                               onUpdatePost({ ...activePost, thumbnailUrl: url });
+                               success("Cover updated");
+                             }}
+                             className="absolute inset-0 flex items-center justify-center bg-blue-600/80 opacity-100 transition-opacity sm:opacity-0 sm:group-hover/mini:opacity-100"
+                             title="Set as Cover"
+                             aria-label={`Set media ${i + 1} as cover`}
+                           >
+                             <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white text-blue-600 shadow-lg">
+                               <ImageIcon className="h-3 w-3" />
+                             </span>
+                           </button>
+                         )}
+                         {activePost.thumbnailUrl === url && (
+                           <span className="absolute right-0.5 top-0.5 h-2 w-2 rounded-full border border-white bg-emerald-500 shadow-sm" />
+                         )}
+                       </div>
+                     ))}
                   </div>
                 )}
               </div>
 
               {/* Right: Info Panels */}
-              <div className="flex-1 flex flex-col min-h-0 bg-white">
-                <header className="p-6 border-b border-zinc-100 flex items-start justify-between">
+               <div className="rr-inspector flex min-h-0 flex-1 flex-col bg-zinc-900">
+                 <header className="flex items-start justify-between border-b border-zinc-800 bg-zinc-900 p-5">
                   <div className="flex-1">
-                     <h2 id="agency-post-viewer-title" className="text-2xl font-black text-zinc-900 leading-tight mb-2 tracking-tight">{activePost.title}</h2>
-                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs font-bold text-zinc-400 uppercase tracking-widest">
-                      <span className="flex items-center gap-1.5 bg-zinc-50 px-2 py-1 rounded-md text-zinc-500">
+                      <h2 id="agency-post-viewer-title" className="mb-2 text-xl font-bold leading-tight tracking-tight text-zinc-100">{activePost.title}</h2>
+                     <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+                       <span className="flex items-center gap-1.5 rounded border border-blue-900/60 bg-blue-950/60 px-2 py-1 text-blue-300">
                         <Tag className="w-3.5 h-3.5" />{activePost.campaignCode || "—"}
                       </span>
                       <span>· {activePost.contentPillar || "—"}</span>
@@ -1329,7 +1378,7 @@ export default function InternalView({
                           type="date"
                           value={activePost.date || ""}
                           onChange={(e) => updatePostWithScheduling(activePost, { date: e.target.value })}
-                          className="bg-transparent border border-transparent hover:border-zinc-300 focus:border-indigo-500 rounded px-1 -ml-0.5 text-xs font-bold text-zinc-400 focus:text-zinc-900 group-hover:text-zinc-600 outline-none transition-all cursor-pointer w-[105px] h-6 inline-flex m-0"
+                          className="bg-transparent border border-transparent hover:border-zinc-300 focus:border-blue-500 rounded px-1 -ml-0.5 text-xs font-bold text-zinc-400 focus:text-zinc-900 group-hover:text-zinc-600 outline-none transition-all cursor-pointer w-[105px] h-6 inline-flex m-0"
                         />
                       </div>
                     </div>
@@ -1344,7 +1393,7 @@ export default function InternalView({
                         >
                           <Trash2 className="w-5 h-5" />
                         </button>
-                        <button onClick={() => { setEditingPost(activePost); setShowFormModal(true); setActivePostId(null); }} className="p-2.5 text-zinc-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all" title="Edit post">
+                        <button onClick={() => { setEditingPost(activePost); setShowFormModal(true); setActivePostId(null); }} className="p-2.5 text-zinc-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all" title="Edit post">
                           <Edit3 className="w-5 h-5" />
                         </button>
                       </>
@@ -1352,7 +1401,7 @@ export default function InternalView({
                     <button
                       type="button"
                       onClick={() => void copyActivePostClientShare()}
-                      className="p-2.5 text-zinc-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all"
+                      className="p-2.5 text-zinc-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all"
                       title="Copy client link for this post only (single-post review)"
                     >
                       <Share2 className="w-5 h-5" />
@@ -1363,13 +1412,13 @@ export default function InternalView({
                   </div>
                 </header>
 
-                <div className="flex-1 overflow-y-auto p-6 space-y-8">
+                 <div className="flex-1 space-y-5 overflow-y-auto p-5">
                   {/* Quick Controls */}
-                  <div className="grid grid-cols-2 gap-4">
+                   <div className="grid grid-cols-2 gap-2">
                     <div className="space-y-2">
                       <label className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400 ml-1">Assignee</label>
-                      <div className="flex items-center gap-3 p-3 bg-zinc-50 rounded-2xl border border-zinc-100">
-                        <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold text-xs">
+                         <div className="flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+                        <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-xs">
                           {(activePost.assignee?.[0] ?? "?").toUpperCase()}
                         </div>
                         {teamMembers.length > 0 ? (
@@ -1392,8 +1441,8 @@ export default function InternalView({
                     </div>
                     <div className="space-y-2">
                       <label className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400 ml-1">Status</label>
-                      <select
-                        className="w-full p-3 bg-zinc-50 rounded-2xl border border-zinc-100 text-sm font-bold text-zinc-900 outline-none appearance-none"
+                         <select
+                             className="w-full appearance-none rounded-lg border border-zinc-800 bg-zinc-950/60 p-3 text-sm font-semibold text-zinc-100 outline-none"
                         value={activePost.internalStatus}
                         onChange={(e) => {
                           const next = e.target.value as InternalStatus;
@@ -1413,9 +1462,9 @@ export default function InternalView({
                   </div>
 
                   {/* Action Buttons */}
-                  <div className="flex flex-wrap gap-3">
+                   <div className="flex flex-wrap gap-2">
                     {canCreate && (
-                      <button onClick={() => handleDuplicate(activePost)} className="flex-1 flex items-center justify-center gap-2 py-3 bg-zinc-50 hover:bg-zinc-100 text-zinc-700 rounded-2xl text-xs font-bold border border-zinc-200 transition-all">
+                       <button onClick={() => handleDuplicate(activePost)} className="flex-1 items-center justify-center gap-2 rounded-lg border border-zinc-800 bg-zinc-950/60 py-3 text-xs font-semibold text-zinc-200 transition-colors hover:border-zinc-600 hover:bg-zinc-800">
                         <Copy className="w-4 h-4" /> Duplicate
                       </button>
                     )}
@@ -1426,7 +1475,7 @@ export default function InternalView({
                           if (!window.confirm(`⚠️ There are ${incompleteTasks.length} incomplete production task(s). Send to client anyway?`)) return;
                         }
                         onUpdatePost({ ...activePost, internalStatus: "Ready for Client", clientStatus: "Needs Your Review" });
-                      }} className="flex-[2] flex items-center justify-center gap-2 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl text-xs font-bold shadow-lg shadow-indigo-100 transition-all">
+                       }} className="flex-[2] items-center justify-center gap-2 rounded-lg bg-blue-600 py-3 text-xs font-semibold text-white transition-colors hover:bg-blue-500">
                          <CheckCircle2 className="w-4 h-4" /> Send for client review
                       </button>
                     )}
@@ -1441,21 +1490,21 @@ export default function InternalView({
                   </div>
 
                   {/* Caption Panel */}
-                  <div className="p-5 bg-zinc-50 rounded-3xl border border-zinc-100">
+                   <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-4">
                     <div className="flex items-center justify-between mb-4">
                       <h3 className="text-xs font-black uppercase tracking-widest text-zinc-400">Captions & Hashtags</h3>
                       <button
                         onClick={handleApplyToBatch}
-                        className="text-[10px] font-bold text-indigo-600 hover:underline hover:text-indigo-700 transition-colors"
+                        className="text-[10px] font-bold text-blue-600 hover:underline hover:text-blue-700 transition-colors"
                         title={selectedIds.size > 0 ? `Apply to ${selectedIds.size} selected posts` : "Apply to all posts"}
                       >
                         {selectedIds.size > 0 ? `Apply to ${selectedIds.size} selected` : "Apply to All Posts"}
                       </button>
                     </div>
-                    <p className="text-sm text-zinc-800 leading-relaxed mb-4 whitespace-pre-wrap break-words">{activePost.caption}</p>
+                     <p className="mb-4 whitespace-pre-wrap break-words text-sm leading-relaxed text-zinc-300">{activePost.caption}</p>
                     <div className="flex flex-wrap gap-1.5">
                       {activePost.hashtags.map((t) => (
-                        <span key={t} className="text-xs font-bold text-indigo-600 bg-indigo-50/50 px-2 py-1 rounded-md">
+                        <span key={t} className="rounded border border-blue-900/60 bg-blue-950/50 px-2 py-1 text-xs font-semibold text-blue-300">
                           {normaliseTag(t)}
                         </span>
                       ))}
@@ -1505,8 +1554,8 @@ export default function InternalView({
                           </button>
                           <span className={`text-sm flex-1 ${t.completed ? "text-zinc-400 line-through" : "text-zinc-700 font-medium"}`}>{t.text}</span>
                           <button
-                            onClick={() => onDeleteTask(activePost.id, t.id)}
-                            className="opacity-0 group-hover:opacity-100 p-1.5 text-zinc-300 hover:text-red-500 transition-all"
+                             onClick={() => onDeleteTask(activePost.id, t.id)}
+                             className="p-1.5 text-zinc-300 opacity-100 transition-all hover:text-red-500 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 sm:opacity-0 sm:group-hover:opacity-100"
                           >
                             <X className="w-4 h-4" />
                           </button>
@@ -1514,7 +1563,7 @@ export default function InternalView({
                       ))}
 
                       {isAddingTask ? (
-                        <div className="flex items-center gap-3 p-3 bg-white border-2 border-dashed border-indigo-200 rounded-2xl">
+                        <div className="flex items-center gap-3 p-3 bg-white border-2 border-dashed border-blue-200 rounded-2xl">
                           <input
                             autoFocus
                             className="flex-1 bg-transparent text-sm font-medium outline-none"
@@ -1545,7 +1594,7 @@ export default function InternalView({
                     <h3 className="text-xs font-black uppercase tracking-widest text-zinc-400 flex items-center gap-2 px-1">
                       <MessageSquare className="w-3.5 h-3.5" /> Feedback & Discussion
                     </h3>
-                    <div className="space-y-3 bg-zinc-50 rounded-[32px] p-5 border border-zinc-100">
+                     <div className="space-y-3 rounded-lg border border-zinc-800 bg-zinc-950/50 p-4">
                       <div className="max-h-[300px] overflow-y-auto space-y-4 pr-2">
                         {activePost.clientComments.length === 0 && (
                           <div className="text-center py-6">
@@ -1555,7 +1604,7 @@ export default function InternalView({
                         )}
                         {activePost.clientComments.map((c) => (
                           <div key={c.id} className={`flex gap-3 group ${c.isInternalOnly ? "opacity-75" : ""}`}>
-                            <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-[10px] shrink-0 ${c.isInternalOnly ? "bg-amber-100 text-amber-700" : "bg-indigo-100 text-indigo-700"}`}>
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-[10px] shrink-0 ${c.isInternalOnly ? "bg-amber-100 text-amber-700" : "bg-blue-100 text-blue-700"}`}>
                               {c.author[0]}
                             </div>
                             <div className="flex-1 min-w-0">
@@ -1564,7 +1613,7 @@ export default function InternalView({
                                 <span className="text-[10px] font-bold text-zinc-400">{new Date(c.timestamp).toLocaleDateString()}</span>
                                 {c.isInternalOnly && <Lock className="w-2.5 h-2.5 text-amber-500" />}
                               </div>
-                              <p className="text-sm text-zinc-600 leading-relaxed bg-white border border-zinc-100 rounded-2xl px-4 py-2 shadow-sm inline-block">{c.text}</p>
+                              <p className="inline-block rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm leading-relaxed text-zinc-300">{c.text}</p>
                               {c.changeType && (
                                 <div className="mt-1.5 flex flex-wrap gap-1.5 ml-1">
                                   <span className="text-[9px] font-bold uppercase tracking-widest bg-zinc-100 text-zinc-500 px-1.5 py-0.5 rounded border border-zinc-200">
@@ -1586,7 +1635,7 @@ export default function InternalView({
                                 </div>
                               )}
                             </div>
-                            <button onClick={() => onDeleteComment(activePost.id, c.id)} className="opacity-0 group-hover:opacity-100 p-1 text-zinc-300 hover:text-red-500 transition-all self-start pt-1">
+                             <button type="button" onClick={() => onDeleteComment(activePost.id, c.id)} className="self-start p-1 pt-1 text-zinc-300 opacity-100 transition-all hover:text-red-500 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 sm:opacity-0 sm:group-hover:opacity-100">
                               <X className="w-3.5 h-3.5" />
                             </button>
                           </div>
@@ -1596,7 +1645,7 @@ export default function InternalView({
                       {/* Comment Composer */}
                       <div className="relative pt-2 border-t border-zinc-200/50 mt-2">
                         <input
-                          className="w-full bg-white border border-zinc-200 rounded-2xl pl-4 pr-28 py-3 text-sm focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm"
+                           className="w-full rounded-lg border border-zinc-800 bg-zinc-900 py-3 pl-4 pr-28 text-sm text-zinc-100 outline-none transition-colors placeholder:text-zinc-600 focus:border-blue-500"
                           placeholder="Add a reply…"
                           value={newCommentText}
                           onChange={(e) => setNewCommentText(e.target.value)}
@@ -1619,7 +1668,7 @@ export default function InternalView({
                           <button
                             onClick={() => submitComment(false)}
                             disabled={!newCommentText.trim()}
-                            className="p-1.5 text-indigo-500 hover:text-indigo-700 disabled:opacity-30 transition-colors"
+                            className="p-1.5 text-blue-400 transition-colors hover:text-blue-300 disabled:opacity-30"
                             title="Send reply"
                           >
                             <Send className="w-4 h-4" />
@@ -1683,7 +1732,7 @@ export default function InternalView({
             </div>
             <div className="flex items-center gap-2">
               {canReviewContent && (
-                <button onClick={handlePushToReview} className="px-4 py-2 bg-indigo-500 hover:bg-indigo-400 rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-lg shadow-indigo-500/20">
+                <button onClick={handlePushToReview} className="px-4 py-2 bg-blue-500 hover:bg-blue-400 rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-lg shadow-blue-500/20">
                    <Send className="w-4 h-4" /> Send for review
                 </button>
               )}
@@ -1693,7 +1742,7 @@ export default function InternalView({
               {canSchedule && (
                 <>
                   <button onClick={() => handleBulkStatusChange("Scheduled")} className="px-4 py-2 hover:bg-zinc-800 rounded-xl text-xs font-bold transition-all flex items-center gap-2">
-                    <Edit3 className="w-4 h-4 text-purple-400" /> Set Scheduled
+                     <Edit3 className="w-4 h-4 text-blue-400" /> Set Scheduled
                   </button>
                   <button onClick={() => handleBulkStatusChange("Posted")} className="px-4 py-2 hover:bg-zinc-800 rounded-xl text-xs font-bold transition-all flex items-center gap-2">
                     <Edit3 className="w-4 h-4 text-emerald-400" /> Set Posted
@@ -1776,6 +1825,8 @@ export default function InternalView({
           onUnreadChange={setUnreadUpdates}
         />
       )}
+        </div>
+      </div>
     </div>
   );
 }

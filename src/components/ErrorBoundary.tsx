@@ -27,7 +27,7 @@ export default class ErrorBoundary extends React.Component<{ children: React.Rea
                 <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="max-w-md w-full bg-white rounded-2xl shadow-xl border border-zinc-200 p-8 text-center"
+                     className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-8 text-center shadow-[0_24px_70px_-30px_rgba(15,23,42,0.35)]"
                 >
                     <div className="w-14 h-14 rounded-full bg-red-50 flex items-center justify-center mx-auto mb-4">
                         <AlertTriangle className="w-7 h-7 text-red-500" />
@@ -46,7 +46,7 @@ export default class ErrorBoundary extends React.Component<{ children: React.Rea
                             this.setState({ hasError: false, error: undefined });
                             window.location.reload();
                         }}
-                        className="mt-6 flex items-center gap-2 mx-auto px-5 py-2.5 bg-zinc-900 text-white text-sm font-semibold rounded-xl hover:bg-zinc-800 transition-colors"
+                         className="mx-auto mt-6 inline-flex min-h-10 items-center gap-2 rounded-lg bg-zinc-900 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-zinc-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
                     >
                         <RefreshCw className="w-4 h-4" /> Reload App
                     </button>

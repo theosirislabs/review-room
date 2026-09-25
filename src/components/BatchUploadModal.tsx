@@ -171,7 +171,7 @@ export default function BatchUploadModal({ isOpen, onClose, onComplete }: Props)
                         {/* Header */}
                         <div className="px-8 py-6 border-b border-zinc-100 flex items-center justify-between bg-zinc-50/50">
                             <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-2xl bg-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-200">
+                                <div className="w-10 h-10 rounded-2xl bg-blue-600 flex items-center justify-center shadow-lg shadow-blue-200">
                                     <Zap className="w-6 h-6 text-white" />
                                 </div>
                                 <div>
@@ -196,7 +196,7 @@ export default function BatchUploadModal({ isOpen, onClose, onComplete }: Props)
                                         onDragLeave={() => setIsDragging(false)}
                                         onDrop={onDrop}
                                         onClick={() => fileInputRef.current?.click()}
-                                        className={`h-full border-2 border-dashed rounded-3xl flex flex-col items-center justify-center gap-4 cursor-pointer transition-all group ${isDragging ? "border-indigo-500 bg-indigo-50 scale-[0.98]" : "border-zinc-200 hover:border-indigo-400 hover:bg-indigo-50/30"
+                                        className={`h-full border-2 border-dashed rounded-3xl flex flex-col items-center justify-center gap-4 cursor-pointer transition-all group ${isDragging ? "border-blue-500 bg-blue-50 scale-[0.98]" : "border-zinc-200 hover:border-blue-400 hover:bg-blue-50/30"
                                             }`}
                                     >
                                         <input
@@ -208,7 +208,7 @@ export default function BatchUploadModal({ isOpen, onClose, onComplete }: Props)
                                             onChange={(e) => { if (e.target.files) handleFiles(e.target.files); e.target.value = ""; }}
                                         />
                                         <div className="w-16 h-16 rounded-full bg-zinc-100 flex items-center justify-center group-hover:scale-110 transition-transform">
-                                            <Upload className={`w-8 h-8 ${isDragging ? "text-indigo-600" : "text-zinc-400"}`} />
+                                            <Upload className={`w-8 h-8 ${isDragging ? "text-blue-600" : "text-zinc-400"}`} />
                                         </div>
                                         <div className="text-center">
                                             <p className="text-base font-bold text-zinc-900">Drop content here</p>
@@ -221,7 +221,7 @@ export default function BatchUploadModal({ isOpen, onClose, onComplete }: Props)
                                             <span className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Staged Assets ({items.length})</span>
                                             <button
                                                 onClick={() => addMoreRef.current?.click()}
-                                                className="text-xs font-bold text-indigo-600 hover:underline"
+                                                className="text-xs font-bold text-blue-600 hover:underline"
                                             >
                                                 Add more
                                             </button>
@@ -244,7 +244,7 @@ export default function BatchUploadModal({ isOpen, onClose, onComplete }: Props)
                                                     onDragOver={(e) => onThumbDragOver(e, idx)}
                                                     onDrop={(e) => onThumbDrop(e, idx)}
                                                     onDragEnd={() => setDragOverIdx(null)}
-                                                    className={`relative ${tileAspectClass(item.format)} rounded-2xl overflow-hidden group border-2 transition-all cursor-grab active:cursor-grabbing ${dragOverIdx === idx ? "border-indigo-400 scale-105 shadow-xl z-10" : "border-zinc-100 bg-zinc-50 shadow-sm"}`}
+                                                    className={`relative ${tileAspectClass(item.format)} rounded-2xl overflow-hidden group border-2 transition-all cursor-grab active:cursor-grabbing ${dragOverIdx === idx ? "border-blue-400 scale-105 shadow-xl z-10" : "border-zinc-100 bg-zinc-50 shadow-sm"}`}
                                                 >
                                                     {item.format === "reel" || (item.format === "story" && item.file.type.startsWith("video/")) ? (
                                                         <video src={item.url} className="w-full h-full object-cover" muted autoPlay loop playsInline />
@@ -297,11 +297,11 @@ export default function BatchUploadModal({ isOpen, onClose, onComplete }: Props)
                                         <button
                                             onClick={() => setMode("individual")}
                                             className={`flex items-center gap-3 p-4 rounded-2xl border transition-all ${mode === "individual"
-                                                ? "bg-white border-indigo-200 shadow-lg shadow-indigo-100 ring-2 ring-indigo-500/10"
+                                                ? "bg-white border-blue-200 shadow-lg shadow-blue-100 ring-2 ring-blue-500/10"
                                                 : "bg-white/50 border-zinc-200 hover:border-zinc-300"
                                                 }`}
                                         >
-                                            <Grid3X3 className={`w-5 h-5 ${mode === "individual" ? "text-indigo-600" : "text-zinc-400"}`} />
+                                            <Grid3X3 className={`w-5 h-5 ${mode === "individual" ? "text-blue-600" : "text-zinc-400"}`} />
                                             <div className="text-left">
                                                 <p className="text-sm font-bold text-zinc-900">Separate Posts</p>
                                                 <p className="text-[10px] text-zinc-500 leading-tight">1 Post per asset</p>
@@ -310,11 +310,11 @@ export default function BatchUploadModal({ isOpen, onClose, onComplete }: Props)
                                         <button
                                             onClick={() => setMode("carousel")}
                                             className={`flex items-center gap-3 p-4 rounded-2xl border transition-all ${mode === "carousel"
-                                                ? "bg-white border-indigo-200 shadow-lg shadow-indigo-100 ring-2 ring-indigo-500/10"
+                                                ? "bg-white border-blue-200 shadow-lg shadow-blue-100 ring-2 ring-blue-500/10"
                                                 : "bg-white/50 border-zinc-200 hover:border-zinc-300"
                                                 }`}
                                         >
-                                            <Layers className={`w-5 h-5 ${mode === "carousel" ? "text-indigo-600" : "text-zinc-400"}`} />
+                                            <Layers className={`w-5 h-5 ${mode === "carousel" ? "text-blue-600" : "text-zinc-400"}`} />
                                             <div className="text-left">
                                                 <p className="text-sm font-bold text-zinc-900">Merged Carousel</p>
                                                 <p className="text-[10px] text-zinc-500 leading-tight">Combine all into 1 post</p>
@@ -332,7 +332,7 @@ export default function BatchUploadModal({ isOpen, onClose, onComplete }: Props)
                                                 value={baseTitle}
                                                 onChange={(e) => setBaseTitle(e.target.value)}
                                                 placeholder="Spring Collection..."
-                                                className="w-full px-4 py-3 bg-white border border-zinc-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 transition-all outline-none"
+                                                className="w-full px-4 py-3 bg-white border border-zinc-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 transition-all outline-none"
                                             />
                                         </div>
                                     </div>

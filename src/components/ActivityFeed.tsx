@@ -13,12 +13,12 @@ const ACTION_ICONS: Record<string, any> = {
 };
 
 const ACTION_COLORS: Record<string, string> = {
-    "status-changed": "text-indigo-400 bg-indigo-950",
+    "status-changed": "text-blue-400 bg-blue-950",
     "comment-added": "text-blue-400 bg-blue-950",
     "post-created": "text-emerald-400 bg-emerald-950",
     "post-deleted": "text-red-400 bg-red-950",
     "bulk-upload": "text-amber-400 bg-amber-950",
-    "ready-for-client": "text-purple-400 bg-purple-950",
+     "ready-for-client": "text-blue-400 bg-blue-950",
 };
 
 function timeAgo(ts: string) {
@@ -69,7 +69,7 @@ export default function ActivityFeed({ adminToken, liveEvents = [] }: Props) {
     return (
         <div className="flex flex-col h-full">
             <div className="px-4 py-3 border-b border-zinc-800 flex items-center gap-2">
-                <Zap className="w-3.5 h-3.5 text-indigo-400" />
+                <Zap className="w-3.5 h-3.5 text-blue-400" />
                 <span className="text-xs font-black uppercase tracking-widest text-zinc-400">Live Activity</span>
                 {liveEvents.length > 0 && (
                     <span className="ml-auto w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
@@ -92,7 +92,7 @@ export default function ActivityFeed({ adminToken, liveEvents = [] }: Props) {
                                 animate={{ opacity: 1, x: 0 }}
                                 className="flex gap-3 items-start"
                             >
-                                <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${colorClass}`}>
+                                <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${colorClass}`}>
                                     <Icon className="w-3.5 h-3.5" />
                                 </div>
                                 <div className="flex-1 min-w-0">

@@ -150,8 +150,8 @@ export default function CampaignManagerModal({ isOpen, onClose, tenantId, adminT
                                                     <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />{c.startDate} → {c.endDate}</span>
                                                 </div>
                                             </div>
-                                            <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                <button onClick={() => setEditingCampaign(c)} className="p-1.5 hover:bg-indigo-50 hover:text-indigo-600 rounded-lg transition-colors text-zinc-400">
+                                             <div className="flex gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
+                                                <button onClick={() => setEditingCampaign(c)} className="p-1.5 hover:bg-blue-50 hover:text-blue-600 rounded-lg transition-colors text-zinc-400">
                                                     <Edit3 className="w-4 h-4" />
                                                 </button>
                                                 <button
@@ -167,13 +167,13 @@ export default function CampaignManagerModal({ isOpen, onClose, tenantId, adminT
 
                                 {/* Edit/Create Campaign Form */}
                                 {editingCampaign && (
-                                    <div className="p-5 bg-indigo-50 rounded-2xl border border-indigo-100 space-y-3">
-                                        <h3 className="text-sm font-black text-indigo-900 uppercase tracking-wider">{editingCampaign.id ? "Edit Campaign" : "New Campaign"}</h3>
+                                    <div className="p-5 bg-blue-50 rounded-2xl border border-blue-100 space-y-3">
+                                        <h3 className="text-sm font-black text-blue-900 uppercase tracking-wider">{editingCampaign.id ? "Edit Campaign" : "New Campaign"}</h3>
                                         {campaignError && <p role="alert" className="text-xs font-semibold text-red-600">{campaignError}</p>}
                                         <div className="grid grid-cols-2 gap-3">
-                                            <input className="col-span-2 px-3 py-2.5 bg-white border border-indigo-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-indigo-400 outline-none" placeholder="Campaign name *" value={editingCampaign.name || ""} onChange={e => setEditingCampaign(p => ({ ...p, name: e.target.value }))} />
-                                            <input className="px-3 py-2.5 bg-white border border-indigo-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-indigo-400 outline-none uppercase" placeholder="Code (e.g. SPR26)" value={editingCampaign.code || ""} onChange={e => setEditingCampaign(p => ({ ...p, code: e.target.value.toUpperCase() }))} />
-                                            <div className="flex items-center gap-2 px-3 py-2 bg-white border border-indigo-200 rounded-xl">
+                                            <input className="col-span-2 px-3 py-2.5 bg-white border border-blue-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-400 outline-none" placeholder="Campaign name *" value={editingCampaign.name || ""} onChange={e => setEditingCampaign(p => ({ ...p, name: e.target.value }))} />
+                                            <input className="px-3 py-2.5 bg-white border border-blue-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-blue-400 outline-none uppercase" placeholder="Code (e.g. SPR26)" value={editingCampaign.code || ""} onChange={e => setEditingCampaign(p => ({ ...p, code: e.target.value.toUpperCase() }))} />
+                                            <div className="flex items-center gap-2 px-3 py-2 bg-white border border-blue-200 rounded-xl">
                                                 <Palette className="w-4 h-4 text-zinc-400" />
                                                 <div className="flex gap-1 flex-wrap">
                                                     {PRESET_COLORS.map(color => (
@@ -181,20 +181,20 @@ export default function CampaignManagerModal({ isOpen, onClose, tenantId, adminT
                                                     ))}
                                                 </div>
                                             </div>
-                                            <input type="date" className="px-3 py-2.5 bg-white border border-indigo-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400 outline-none" value={editingCampaign.startDate || ""} onChange={e => setEditingCampaign(p => ({ ...p, startDate: e.target.value }))} />
-                                            <input type="date" className="px-3 py-2.5 bg-white border border-indigo-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400 outline-none" value={editingCampaign.endDate || ""} onChange={e => setEditingCampaign(p => ({ ...p, endDate: e.target.value }))} />
-                                            <input className="col-span-2 px-3 py-2.5 bg-white border border-indigo-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400 outline-none" placeholder="Description (optional)" value={editingCampaign.description || ""} onChange={e => setEditingCampaign(p => ({ ...p, description: e.target.value }))} />
+                                            <input type="date" className="px-3 py-2.5 bg-white border border-blue-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-400 outline-none" value={editingCampaign.startDate || ""} onChange={e => setEditingCampaign(p => ({ ...p, startDate: e.target.value }))} />
+                                            <input type="date" className="px-3 py-2.5 bg-white border border-blue-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-400 outline-none" value={editingCampaign.endDate || ""} onChange={e => setEditingCampaign(p => ({ ...p, endDate: e.target.value }))} />
+                                            <input className="col-span-2 px-3 py-2.5 bg-white border border-blue-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-400 outline-none" placeholder="Description (optional)" value={editingCampaign.description || ""} onChange={e => setEditingCampaign(p => ({ ...p, description: e.target.value }))} />
                                         </div>
                                         <div className="flex gap-2">
                                             <button onClick={() => setEditingCampaign(null)} className="flex-1 py-2.5 text-sm font-bold text-zinc-500 hover:bg-zinc-100 rounded-xl transition-colors">Cancel</button>
-                                            <button onClick={saveCampaign} className="flex-[2] py-2.5 text-sm font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl transition-colors">Save Campaign</button>
+                                            <button onClick={saveCampaign} className="flex-[2] py-2.5 text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-colors">Save Campaign</button>
                                         </div>
                                     </div>
                                 )}
 
                                 <button
                                     onClick={() => setEditingCampaign({ color: "#6366f1" })}
-                                    className="w-full flex items-center justify-center gap-2 py-3 border-2 border-dashed border-zinc-200 hover:border-indigo-400 hover:text-indigo-600 text-zinc-400 rounded-2xl text-sm font-bold transition-all"
+                                    className="w-full flex items-center justify-center gap-2 py-3 border-2 border-dashed border-zinc-200 hover:border-blue-400 hover:text-blue-600 text-zinc-400 rounded-2xl text-sm font-bold transition-all"
                                 >
                                     <Plus className="w-4 h-4" /> New Campaign
                                 </button>
@@ -208,7 +208,7 @@ export default function CampaignManagerModal({ isOpen, onClose, tenantId, adminT
                                             <span className="text-sm font-semibold text-zinc-800 flex-1">{p.name}</span>
                                             <button
                                                 onClick={() => setConfirmDelete({ open: true, label: `Delete "${p.name}" pillar?`, onConfirm: () => deletePillar(p.id) })}
-                                                className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-red-50 hover:text-red-500 rounded-lg transition-all text-zinc-400"
+                                                 className="p-1.5 text-zinc-400 opacity-100 transition-all hover:bg-red-50 hover:text-red-500 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 sm:opacity-0 sm:group-hover:opacity-100"
                                             >
                                                 <Trash2 className="w-4 h-4" />
                                             </button>
@@ -218,7 +218,7 @@ export default function CampaignManagerModal({ isOpen, onClose, tenantId, adminT
 
                                 <div className="p-4 bg-zinc-50 rounded-2xl border border-zinc-100 space-y-3">
                                     <h3 className="text-xs font-black uppercase tracking-widest text-zinc-400">Add Pillar</h3>
-                                    <input className="w-full px-3 py-2.5 bg-white border border-zinc-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-indigo-400 outline-none" placeholder="Pillar name (e.g. Education)" value={newPillarName} onChange={e => setNewPillarName(e.target.value)} onKeyDown={e => e.key === "Enter" && addPillar()} />
+                                    <input className="w-full px-3 py-2.5 bg-white border border-zinc-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-400 outline-none" placeholder="Pillar name (e.g. Education)" value={newPillarName} onChange={e => setNewPillarName(e.target.value)} onKeyDown={e => e.key === "Enter" && addPillar()} />
                                     <div className="flex items-center gap-2">
                                         <Tag className="w-4 h-4 text-zinc-400" />
                                         <div className="flex gap-1.5 flex-wrap">
@@ -226,7 +226,7 @@ export default function CampaignManagerModal({ isOpen, onClose, tenantId, adminT
                                                 <button key={color} onClick={() => setNewPillarColor(color)} className={`w-5 h-5 rounded-full transition-transform ${newPillarColor === color ? "scale-125 ring-2 ring-offset-1 ring-zinc-400" : "hover:scale-110"}`} style={{ backgroundColor: color }} />
                                             ))}
                                         </div>
-                                        <button onClick={addPillar} disabled={!newPillarName.trim()} className="ml-auto flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg transition-colors disabled:opacity-40">
+                                        <button onClick={addPillar} disabled={!newPillarName.trim()} className="ml-auto flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition-colors disabled:opacity-40">
                                             <Plus className="w-3.5 h-3.5" /> Add
                                         </button>
                                     </div>

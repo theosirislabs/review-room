@@ -8,7 +8,7 @@ import { useToast } from "./Toast";
 const ROLE_LABELS: Record<string, { label: string; color: string }> = {
   "super-admin": { label: "Super Admin", color: "bg-blue-100 text-blue-700" },
   "graphic-designer": { label: "Graphic Designer", color: "bg-emerald-100 text-emerald-700" },
-  "marketing-team": { label: "Marketing Team", color: "bg-cyan-100 text-cyan-700" },
+  "marketing-team": { label: "Marketing Team", color: "bg-blue-100 text-blue-700" },
   reviewer: { label: "Reviewer", color: "bg-amber-100 text-amber-700" },
   user: { label: "User (default)", color: "bg-zinc-100 text-zinc-600" },
 };

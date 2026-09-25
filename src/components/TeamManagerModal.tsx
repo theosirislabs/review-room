@@ -6,7 +6,7 @@ import ConfirmDialog from "./ConfirmDialog";
 import { useToast } from "./Toast";
 
 const ROLE_LABELS: Record<string, { label: string; color: string }> = {
-    admin: { label: "Admin", color: "bg-indigo-100 text-indigo-700" },
+    admin: { label: "Admin", color: "bg-blue-100 text-blue-700" },
     editor: { label: "Editor", color: "bg-emerald-100 text-emerald-700" },
     viewer: { label: "Viewer", color: "bg-zinc-100 text-zinc-600" },
 };
@@ -92,7 +92,7 @@ export default function TeamManagerModal({ isOpen, onClose, adminToken, members,
                     <div className="flex-1 overflow-y-auto p-6 space-y-3">
                         {members.map(m => (
                             <div key={m.id} className="flex items-center gap-4 p-4 bg-zinc-50 rounded-2xl border border-zinc-100 group">
-                                <div className="w-10 h-10 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center font-black text-sm shrink-0">
+                                <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center font-black text-sm shrink-0">
                                     {m.name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2)}
                                 </div>
                                 <div className="flex-1 min-w-0">
@@ -106,7 +106,7 @@ export default function TeamManagerModal({ isOpen, onClose, adminToken, members,
                                             <option value="editor">Editor</option>
                                             <option value="viewer">Viewer</option>
                                         </select>
-                                        <button onClick={() => updateRole(m.id)} className="text-xs bg-indigo-600 text-white px-2.5 py-1 rounded-lg font-bold">Save</button>
+                                        <button onClick={() => updateRole(m.id)} className="text-xs bg-blue-600 text-white px-2.5 py-1 rounded-lg font-bold">Save</button>
                                         <button onClick={() => setEditingId(null)} className="text-xs text-zinc-400 px-2 py-1">✕</button>
                                     </div>
                                 ) : (
@@ -115,8 +115,8 @@ export default function TeamManagerModal({ isOpen, onClose, adminToken, members,
                                             {ROLE_LABELS[m.role]?.label}
                                         </span>
                                         {canManage && (
-                                            <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                <button onClick={() => { setEditingId(m.id); setEditRole(m.role); }} className="p-1.5 hover:bg-indigo-50 hover:text-indigo-600 rounded-lg transition-colors text-zinc-300">
+                                             <div className="flex gap-0.5 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
+                                                <button onClick={() => { setEditingId(m.id); setEditRole(m.role); }} className="p-1.5 hover:bg-blue-50 hover:text-blue-600 rounded-lg transition-colors text-zinc-300">
                                                     <Edit3 className="w-3.5 h-3.5" />
                                                 </button>
                                                 <button onClick={() => setConfirmDelete({ open: true, id: m.id, name: m.name })} className="p-1.5 hover:bg-red-50 hover:text-red-500 rounded-lg transition-colors text-zinc-300">
@@ -130,24 +130,24 @@ export default function TeamManagerModal({ isOpen, onClose, adminToken, members,
                         ))}
 
                         {canManage && adding ? (
-                            <div className="p-5 bg-indigo-50 rounded-2xl border border-indigo-100 space-y-3">
-                                <h3 className="text-xs font-black uppercase tracking-widest text-indigo-700">Add Team Member</h3>
-                                <input className="w-full px-3 py-2.5 bg-white border border-indigo-200 rounded-xl text-sm text-zinc-900 placeholder:text-zinc-400 focus:ring-2 focus:ring-indigo-400 outline-none" placeholder="Full name *" value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} />
-                                <input className="w-full px-3 py-2.5 bg-white border border-indigo-200 rounded-xl text-sm text-zinc-900 placeholder:text-zinc-400 focus:ring-2 focus:ring-indigo-400 outline-none" placeholder="Email address *" type="email" value={form.email} onChange={e => setForm(p => ({ ...p, email: e.target.value }))} />
-                                <select className="w-full px-3 py-2.5 bg-white border border-indigo-200 rounded-xl text-sm text-zinc-900 focus:ring-2 focus:ring-indigo-400 outline-none" value={form.role} onChange={e => setForm(p => ({ ...p, role: e.target.value }))}>
+                            <div className="p-5 bg-blue-50 rounded-2xl border border-blue-100 space-y-3">
+                                <h3 className="text-xs font-black uppercase tracking-widest text-blue-700">Add Team Member</h3>
+                                <input className="w-full px-3 py-2.5 bg-white border border-blue-200 rounded-xl text-sm text-zinc-900 placeholder:text-zinc-400 focus:ring-2 focus:ring-blue-400 outline-none" placeholder="Full name *" value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} />
+                                <input className="w-full px-3 py-2.5 bg-white border border-blue-200 rounded-xl text-sm text-zinc-900 placeholder:text-zinc-400 focus:ring-2 focus:ring-blue-400 outline-none" placeholder="Email address *" type="email" value={form.email} onChange={e => setForm(p => ({ ...p, email: e.target.value }))} />
+                                <select className="w-full px-3 py-2.5 bg-white border border-blue-200 rounded-xl text-sm text-zinc-900 focus:ring-2 focus:ring-blue-400 outline-none" value={form.role} onChange={e => setForm(p => ({ ...p, role: e.target.value }))}>
                                     <option value="admin">Admin — full access</option>
                                     <option value="editor">Editor — can create & edit posts</option>
                                     <option value="viewer">Viewer — read only</option>
                                 </select>
                                 <div className="flex gap-2">
                                     <button onClick={() => setAdding(false)} className="flex-1 py-2.5 text-sm font-bold text-zinc-500 hover:bg-zinc-100 rounded-xl transition-colors">Cancel</button>
-                                    <button onClick={saveNew} disabled={saving} className="flex-[2] py-2.5 text-sm font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl transition-colors disabled:opacity-50">
+                                    <button onClick={saveNew} disabled={saving} className="flex-[2] py-2.5 text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-colors disabled:opacity-50">
                                         {saving ? "Adding..." : "Add Member"}
                                     </button>
                                 </div>
                             </div>
                         ) : canManage ? (
-                            <button onClick={() => setAdding(true)} className="w-full flex items-center justify-center gap-2 py-3 border-2 border-dashed border-zinc-200 hover:border-indigo-400 hover:text-indigo-600 text-zinc-400 rounded-2xl text-sm font-bold transition-all">
+                            <button onClick={() => setAdding(true)} className="w-full flex items-center justify-center gap-2 py-3 border-2 border-dashed border-zinc-200 hover:border-blue-400 hover:text-blue-600 text-zinc-400 rounded-2xl text-sm font-bold transition-all">
                                 <Plus className="w-4 h-4" /> Add Team Member
                             </button>
                         ) : null}

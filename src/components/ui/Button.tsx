@@ -8,7 +8,7 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 export function Button({ variant = "primary", size = "md", children, icon, className = "", type = "button", ...props }: ButtonProps) {
-    const baseStyles = "inline-flex min-h-10 items-center justify-center rounded-lg font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50";
+    const baseStyles = "inline-flex min-h-10 items-center justify-center rounded-lg font-semibold transition-[background-color,border-color,color,box-shadow,transform] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50";
 
     const sizeStyles = {
         sm: "px-3 py-1.5 text-xs gap-1.5",
@@ -17,11 +17,11 @@ export function Button({ variant = "primary", size = "md", children, icon, class
     };
 
     const variantStyles = {
-        primary: "bg-blue-600 text-white shadow-sm hover:bg-blue-700",
-        secondary: "bg-white border border-zinc-200 text-zinc-700 hover:bg-zinc-50 hover:border-zinc-300",
-        danger: "bg-red-50 hover:bg-red-100 text-red-600 border border-red-200",
-        ghost: "bg-transparent hover:bg-zinc-100 text-zinc-600",
-        outline: "border border-slate-300 bg-white text-slate-700 hover:border-blue-400 hover:text-blue-700"
+        primary: "bg-blue-600 text-white shadow-sm hover:bg-blue-700 hover:shadow-md",
+        secondary: "border border-zinc-200 bg-white text-zinc-700 shadow-sm hover:border-zinc-300 hover:bg-zinc-50",
+        danger: "border border-red-200 bg-red-50 text-red-700 hover:border-red-300 hover:bg-red-100",
+        ghost: "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900",
+        outline: "border border-zinc-300 bg-transparent text-zinc-700 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
     };
 
     return (

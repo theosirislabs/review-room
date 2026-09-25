@@ -114,7 +114,7 @@ export default function UpdatesModal({
           <div className="flex items-start justify-between mb-5">
             <div>
               <h2 className="text-lg font-black text-white flex items-center gap-2">
-                <Megaphone className="w-5 h-5 text-indigo-400" /> What's new
+                <Megaphone className="w-5 h-5 text-blue-400" /> What's new
               </h2>
               <p className="text-xs text-zinc-500 mt-1">Product updates for agency staff. Clients never see this.</p>
             </div>
@@ -124,7 +124,7 @@ export default function UpdatesModal({
           {isSuperAdmin && (
             <div className="mb-5">
               {!composing ? (
-                <button onClick={() => setComposing(true)} className="text-xs font-bold text-indigo-400 hover:text-indigo-300 flex items-center gap-1">
+                <button onClick={() => setComposing(true)} className="text-xs font-bold text-blue-400 hover:text-blue-300 flex items-center gap-1">
                   <Plus className="w-3.5 h-3.5" /> New update
                 </button>
               ) : (
@@ -145,7 +145,7 @@ export default function UpdatesModal({
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white resize-y"
                   />
                   <div className="flex gap-2">
-                    <button onClick={() => void publish()} className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-bold">Publish</button>
+                    <button onClick={() => void publish()} className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-bold">Publish</button>
                     <button onClick={() => { setComposing(false); setTitle(""); setBody(""); }} className="px-3 py-1.5 rounded-lg text-zinc-400 text-xs font-bold">Cancel</button>
                   </div>
                 </div>

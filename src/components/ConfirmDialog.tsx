@@ -75,7 +75,7 @@ export default function ConfirmDialog({
                         animate={{ scale: 1, opacity: 1, y: 0 }}
                         exit={{ scale: 0.95, opacity: 0, y: 8 }}
                         transition={{ type: "spring", damping: 25, stiffness: 350 }}
-                        className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6"
+                        className="w-full max-w-sm rounded-2xl border border-zinc-200 bg-white p-6 shadow-[0_24px_70px_-30px_rgba(15,23,42,0.45)]"
                         onClick={(e) => e.stopPropagation()}
                     >
                         <div className="flex items-start gap-4 mb-5">

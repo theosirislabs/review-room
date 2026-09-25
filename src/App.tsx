@@ -523,7 +523,7 @@ function AppContent() {
 
   if (authError) {
     return (
-      <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center p-6 selection:bg-indigo-500/30">
+      <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center p-6 selection:bg-blue-500/30">
         <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="w-full max-w-md text-center">
           <div className="w-20 h-20 bg-red-500/10 border border-red-500/20 rounded-[2rem] flex items-center justify-center text-red-500 mb-8 mx-auto shadow-2xl shadow-red-500/5">
             <Lock className="w-10 h-10" />
@@ -591,7 +591,7 @@ function AppContent() {
     );
 
   return (
-    <div className="relative min-h-screen bg-zinc-900 overflow-hidden">
+    <div className="rr-agency relative min-h-screen bg-zinc-900 overflow-hidden">
       <Suspense fallback={<GridSkeleton client={renderClientSurface} />}>
         {viewMode === "internal" && !isClientPreview ? (
             <motion.div
@@ -636,7 +636,7 @@ function AppContent() {
             >
               {isClientPreview ? (
                 <div className="fixed bottom-6 right-6 z-[100] flex items-center gap-3 rounded-full bg-zinc-900/95 pl-4 pr-2 py-2 text-white shadow-2xl border border-zinc-700/50">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-indigo-200">Client preview</span>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-blue-200">Client preview</span>
                   <button
                     onClick={() => navigate(`/agency/${workspaceTenantId || tenantId}`)}
                     className="flex items-center gap-2 rounded-full bg-white px-3 py-2 text-xs font-bold text-zinc-900 transition-colors hover:bg-zinc-100"

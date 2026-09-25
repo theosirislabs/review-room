@@ -142,15 +142,15 @@ export default function McpKeysModal({
         >
           <div className="flex items-start justify-between mb-5">
             <div>
-              <h2 className="text-lg font-black text-white flex items-center gap-2"><Bot className="w-5 h-5 text-indigo-400" /> Agent MCP</h2>
+              <h2 className="text-lg font-black text-white flex items-center gap-2"><Bot className="w-5 h-5 text-blue-400" /> Agent MCP</h2>
               <p className="text-xs text-zinc-500 mt-1">Mint a key, paste it into Hermes / Cursor / Claude, then start a <span className="text-zinc-300">new session</span>. Empty token = silent fail.</p>
             </div>
             <button onClick={onClose} className="p-2 text-zinc-500 hover:text-white"><X className="w-4 h-4" /></button>
           </div>
 
           {revealed && (
-            <div className="mb-5 rounded-xl border border-indigo-500/40 bg-indigo-500/10 p-4 space-y-3">
-              <p className="text-[10px] font-black uppercase tracking-widest text-indigo-300">Shown once</p>
+            <div className="mb-5 rounded-xl border border-blue-500/40 bg-blue-500/10 p-4 space-y-3">
+              <p className="text-[10px] font-black uppercase tracking-widest text-blue-300">Shown once</p>
               <code className="block text-[11px] text-zinc-200 break-all bg-black/40 rounded-lg p-2">{revealed}</code>
               <div className="flex flex-wrap gap-2">
                 <button onClick={() => copy("token", revealed)} className="px-3 py-1.5 rounded-lg bg-zinc-800 text-xs font-bold text-white flex items-center gap-1"><Copy className="w-3 h-3" /> Token</button>
@@ -179,7 +179,7 @@ export default function McpKeysModal({
               <option value={90}>90 days</option>
               <option value={365}>365 days</option>
             </select>
-            <button onClick={() => void mint()} className="rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold px-3 py-2 flex items-center justify-center gap-1">
+            <button onClick={() => void mint()} className="rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold px-3 py-2 flex items-center justify-center gap-1">
               <Plus className="w-4 h-4" /> Generate
             </button>
           </div>

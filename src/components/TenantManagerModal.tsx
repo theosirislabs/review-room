@@ -109,7 +109,7 @@ export default function TenantManagerModal({ isOpen, onClose, tenants, onUpsert,
                             {/* Header */}
                             <div className="px-6 py-4 border-b border-zinc-100 flex items-center justify-between bg-zinc-50/50">
                                 <div className="flex items-center gap-2">
-                                    <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center">
+                                    <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center">
                                         <ShieldCheck className="w-5 h-5 text-white" />
                                     </div>
                                     <div>
@@ -127,7 +127,7 @@ export default function TenantManagerModal({ isOpen, onClose, tenants, onUpsert,
                                 <div className="w-1/2 flex flex-col min-h-0">
                                     <div className="flex items-center justify-between mb-3 px-1 shrink-0">
                                          <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Client profiles</span>
-                                        <button onClick={startNew} className="text-xs font-bold text-indigo-600 hover:text-indigo-700 flex items-center gap-1">
+                                        <button onClick={startNew} className="text-xs font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1">
                                             <Plus className="w-3 h-3" /> Add New
                                         </button>
                                     </div>
@@ -137,7 +137,7 @@ export default function TenantManagerModal({ isOpen, onClose, tenants, onUpsert,
                                                 key={t.id}
                                                 onClick={() => startEdit(t)}
                                                 className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all border ${editingId === t.id
-                                                    ? "bg-indigo-50 border-indigo-100 shadow-sm"
+                                                    ? "bg-blue-50 border-blue-100 shadow-sm"
                                                     : "bg-white border-zinc-100 hover:border-zinc-200"
                                                     }`}
                                             >
@@ -149,7 +149,7 @@ export default function TenantManagerModal({ isOpen, onClose, tenants, onUpsert,
                                                     onError={(e) => { (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${t.name}`; }}
                                                 />
                                                 <div className="text-left min-w-0">
-                                                    <p className={`text-sm font-semibold truncate ${editingId === t.id ? "text-indigo-900" : "text-zinc-900"}`}>{t.name}</p>
+                                                    <p className={`text-sm font-semibold truncate ${editingId === t.id ? "text-blue-900" : "text-zinc-900"}`}>{t.name}</p>
                                                     <p className="text-[10px] text-zinc-400 font-mono truncate">{t.id}</p>
                                                 </div>
                                             </button>
@@ -171,7 +171,7 @@ export default function TenantManagerModal({ isOpen, onClose, tenants, onUpsert,
                                                     disabled={editingId !== "new"}
                                                     value={form.id}
                                                     onChange={(e) => setForm({ ...form, id: e.target.value.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "") })}
-                                                    className="w-full px-3 py-2 bg-white border border-zinc-200 rounded-lg text-sm text-zinc-900 placeholder:text-zinc-400 focus:ring-2 focus:ring-indigo-500 disabled:opacity-50 disabled:bg-zinc-100"
+                                                    className="w-full px-3 py-2 bg-white border border-zinc-200 rounded-lg text-sm text-zinc-900 placeholder:text-zinc-400 focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:bg-zinc-100"
                                                     placeholder="e.g. apple-inc"
                                                 />
                                                 {editingId === "new" && (
@@ -184,7 +184,7 @@ export default function TenantManagerModal({ isOpen, onClose, tenants, onUpsert,
                                                 <input
                                                     value={form.name}
                                                     onChange={(e) => setForm({ ...form, name: e.target.value })}
-                                                    className="w-full px-3 py-2 bg-white border border-zinc-200 rounded-lg text-sm text-zinc-900 placeholder:text-zinc-400 focus:ring-2 focus:ring-indigo-500"
+                                                    className="w-full px-3 py-2 bg-white border border-zinc-200 rounded-lg text-sm text-zinc-900 placeholder:text-zinc-400 focus:ring-2 focus:ring-blue-500"
                                                     placeholder="e.g. Apple Worldwide"
                                                 />
                                             </div>
@@ -200,7 +200,7 @@ export default function TenantManagerModal({ isOpen, onClose, tenants, onUpsert,
                                                         onError={(e) => { (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${form.name || "Brand"}`; }}
                                                     />
                                                     <div className="flex-1 space-y-2">
-                                                        <label className="inline-flex items-center gap-2 px-4 py-2 bg-zinc-900 text-white rounded-xl text-xs font-bold cursor-pointer hover:bg-zinc-800 transition-all active:scale-95 shadow-lg shadow-indigo-500/10 w-full justify-center">
+                                                        <label className="inline-flex items-center gap-2 px-4 py-2 bg-zinc-900 text-white rounded-xl text-xs font-bold cursor-pointer hover:bg-zinc-800 transition-all active:scale-95 shadow-lg shadow-blue-500/10 w-full justify-center">
                                                             <Plus className="w-4 h-4" />
                                                             {uploading ? "Uploading…" : "Change Logo"}
                                                             <input
@@ -220,7 +220,7 @@ export default function TenantManagerModal({ isOpen, onClose, tenants, onUpsert,
                                                 <textarea
                                                     value={form.bio}
                                                     onChange={(e) => setForm({ ...form, bio: e.target.value })}
-                                                    className="w-full px-3 py-2 bg-white border border-zinc-200 rounded-lg text-sm text-zinc-900 placeholder:text-zinc-400 focus:ring-2 focus:ring-indigo-500 min-h-[80px] resize-none"
+                                                    className="w-full px-3 py-2 bg-white border border-zinc-200 rounded-lg text-sm text-zinc-900 placeholder:text-zinc-400 focus:ring-2 focus:ring-blue-500 min-h-[80px] resize-none"
                                                      placeholder="A short description of this client or brand…"
                                                 />
                                             </div>
@@ -229,7 +229,7 @@ export default function TenantManagerModal({ isOpen, onClose, tenants, onUpsert,
                                                 <button
                                                     onClick={save}
                                                     disabled={!form.id.trim() || !form.name.trim()}
-                                                    className="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white py-2 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-colors shadow-sm active:scale-95"
+                                                    className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white py-2 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-colors shadow-sm active:scale-95"
                                                 >
                                                      <Save className="w-4 h-4" /> Save profile
                                                 </button>

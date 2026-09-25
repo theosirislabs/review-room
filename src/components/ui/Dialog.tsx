@@ -91,7 +91,7 @@ export default function Dialog({
     <AnimatePresence>
       {isOpen && (
         <motion.div
-          className="fixed inset-0 z-[220] flex items-center justify-center p-4 bg-slate-950/55 backdrop-blur-sm"
+           className="fixed inset-0 z-[220] flex items-center justify-center p-4 bg-slate-950/45 backdrop-blur-sm"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -109,7 +109,7 @@ export default function Dialog({
             exit={{ opacity: 0, scale: 0.98, y: 8 }}
             transition={{ duration: 0.16 }}
             onAnimationComplete={focusDialog}
-            className={`flex max-h-[90vh] w-full ${sizes[size]} flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl`}
+             className={`flex max-h-[90vh] w-full ${sizes[size]} flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_24px_70px_-30px_rgba(15,23,42,0.45)]`}
             onClick={(event) => event.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">

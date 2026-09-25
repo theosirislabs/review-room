@@ -32,16 +32,16 @@ interface Props {
   onDeleteComment: (postId: string, commentId: string) => void;
 }
 
-import { fallbackSvg, parseDateSafe, isPostVisibleToClient, shouldRenderAsVideo, tileAspectClass } from "../utils";
+import { fallbackSvg, parseDateSafe, isPostVisibleToClient, shouldRenderAsVideo } from "../utils";
 import OsirisLogo from "./OsirisLogo";
 
 function PostStatusBadge({ status }: { status: Post["clientStatus"] }) {
   const cfg = {
     "Not Ready for Client": "bg-zinc-500/15 text-zinc-300 border-zinc-500/25",
-    "Ready to Schedule": "bg-purple-500/15 text-purple-300 border-purple-500/25",
+     "Ready to Schedule": "bg-blue-500/15 text-blue-200 border-blue-500/25",
     "Approved": "bg-emerald-500/15 text-emerald-300 border-emerald-500/25",
     "Changes Requested": "bg-red-500/20 text-red-300 border-red-400/30",
-    "Needs Your Review": "bg-indigo-500/25 text-indigo-200 border-indigo-400/40",
+    "Needs Your Review": "bg-blue-500/25 text-blue-200 border-blue-400/40",
   }[status];
   return (
     <span className={`text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full border ${cfg}`}>
@@ -161,13 +161,13 @@ function GridTile({ post, index, onClick, isSelected, isSelectMode, onToggleSele
       initial={{ opacity: 0, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1 }}
       transition={{ delay: Math.min(index, 12) * 0.04, duration: 0.3 }}
-      className={`relative block w-full ${tileAspectClass(post.format)} group bg-zinc-200 overflow-hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 rounded-2xl border-2 transition-all ${isSelected ? "border-indigo-500 scale-[0.98] ring-4 ring-indigo-500/20" : "border-transparent"}`}
+                 className={`relative block aspect-square w-full group bg-zinc-200 overflow-hidden rounded-sm border-2 transition-[border-color,box-shadow,transform] focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${isSelected ? "border-blue-500 scale-[0.98] ring-4 ring-blue-500/20" : "border-transparent"}`}
        aria-label={`${isSelectMode ? "Select" : "View"} post: ${post.title}`}
        aria-pressed={isSelectMode ? isSelected : undefined}
     >
       {/* Selection Checkbox */}
       {isSelectMode && (
-        <div className={`absolute top-3 left-3 z-30 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${isSelected ? "bg-indigo-500 border-indigo-500 shadow-lg" : "bg-black/20 border-white/50 backdrop-blur-md"}`}>
+        <div className={`absolute top-3 left-3 z-30 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${isSelected ? "bg-blue-500 border-blue-500 shadow-lg" : "bg-black/20 border-white/50 backdrop-blur-md"}`}>
           {isSelected && <CheckCheck className="w-4 h-4 text-white" />}
         </div>
       )}
@@ -256,7 +256,7 @@ function ScheduleRow({ post, onClick }: ScheduleRowProps) {
   return (
     <button
       onClick={onClick}
-      className="w-full flex items-center gap-3 sm:gap-4 p-3 sm:p-4 bg-white border border-zinc-100 rounded-2xl hover:border-zinc-300 transition-colors text-left group focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+       className="group flex w-full items-center gap-3 rounded-lg border border-zinc-200 bg-white p-3 text-left transition-[border-color,box-shadow] hover:border-zinc-400 hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 sm:gap-4 sm:p-4"
     >
       {/* Thumbnail */}
       <div className={`shrink-0 rounded-xl overflow-hidden bg-zinc-200 relative w-14 sm:w-16 ${post.format === "story" ? "h-24 sm:h-28" : "h-[70px] sm:h-20"}`}>
@@ -582,104 +582,98 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, r
       data-testid="client-review-room"
       data-client-theme={clientTheme}
       data-preview-mode={previewMode ? "true" : undefined}
-      className="rr-client min-h-screen bg-zinc-50 font-sans text-zinc-900 antialiased"
+          className="rr-client min-h-screen bg-white font-sans text-zinc-950 antialiased selection:bg-zinc-950/10"
     >
 
-      {/* ── Header ─────────────────────────────────────────── */}
-      <header className="sticky top-0 z-40 bg-white/80 backdrop-blur-lg border-b border-zinc-200 relative">
+      <header className="sticky top-0 z-40 border-b border-zinc-200 bg-white/95 backdrop-blur-lg">
         {previewMode && (
-          <div className="bg-indigo-600 text-white px-4 py-2 text-center text-[10px] font-black uppercase tracking-widest">
-             Client view preview · Client decisions are disabled
+          <div className="bg-blue-600 px-4 py-2 text-center text-[10px] font-bold uppercase tracking-[0.18em] text-white">
+            Client view preview · Client decisions are disabled
           </div>
         )}
-        <div className="absolute top-0 left-0 right-0 h-[2px] bg-signature" />
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-4">
-          {/* Brand */}
-          <div className="flex items-center gap-3 min-w-0">
+        <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-4 py-3 sm:px-6 lg:px-8">
+          <div className="flex min-w-0 items-center gap-3">
             {logoUrl ? (
-              <img src={logoUrl} onError={(e) => { e.currentTarget.src = fallbackSvg; }} alt={`${displayName} logo`} className="w-7 h-7 rounded-full object-cover border border-zinc-200" />
+              <img src={logoUrl} onError={(e) => { e.currentTarget.src = fallbackSvg; }} alt={`${displayName} logo`} className="h-8 w-8 rounded-full border border-zinc-200 object-cover" />
             ) : (
-              <div className="rr-client-brand-mark w-7 h-7 rounded-full text-white flex items-center justify-center text-[10px] font-bold uppercase shrink-0">
+              <div className="rr-client-brand-mark flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-zinc-950 text-xs font-semibold text-white">
                 {displayName.charAt(0)}
               </div>
             )}
-            <span className="font-semibold text-sm text-zinc-900 truncate max-w-[120px] sm:max-w-none">{displayName}</span>
-            <span className="hidden sm:block text-zinc-300">·</span>
-            <span className="hidden sm:block text-zinc-500 text-sm">{shareSetMode ? "Shared Set" : singlePostShareMode ? "Shared post" : "Client review"}</span>
+            <span className="max-w-[42vw] truncate text-sm font-semibold text-zinc-950 sm:max-w-none">{displayName}</span>
+            <span className="hidden text-xs text-zinc-500 sm:block">
+              {shareSetMode ? "Shared set" : singlePostShareMode ? "Shared post" : "Content review"}
+            </span>
           </div>
 
-          {/* Progress / summary + client-only appearance control */}
-          <div className="flex items-center gap-2 shrink-0">
-            <div ref={summaryRef} className="relative flex-shrink-0 flex items-center gap-2">
-            <button
-              onClick={() => setSummaryOpen((o) => !o)}
-               className="flex items-center gap-3 group"
-               aria-label="Review summary"
-               aria-expanded={summaryOpen}
-               aria-controls="client-review-summary"
-            >
-              <div className="hidden sm:flex flex-col items-end">
-                <span className="text-xs font-medium text-zinc-600 group-hover:text-zinc-900 transition-colors whitespace-nowrap">
-                  {reviewed}/{visiblePosts.length} reviewed
-                </span>
-                <div className="rr-client-progress-track w-24 h-2 rounded-full mt-1 overflow-hidden">
-                  <div className="h-full bg-signature rounded-full transition-all duration-700" style={{ width: `${progress}%` }} />
-                </div>
-              </div>
-              <div className="sm:hidden flex items-center gap-1.5">
-                <div className="rr-client-progress-track w-16 h-2 rounded-full overflow-hidden">
-                  <div className="h-full bg-signature rounded-full transition-all" style={{ width: `${progress}%` }} />
-                </div>
-                <span className="text-xs font-medium text-zinc-600">{progress}%</span>
-              </div>
-            </button>
-
-            <AnimatePresence>
-              {summaryOpen && (
-                <motion.div
-                  initial={{ opacity: 0, y: 6, scale: 0.97 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: 6, scale: 0.97 }}
-                  transition={{ duration: 0.15 }}
-                   id="client-review-summary"
-                   className="absolute right-0 mt-2 w-56 bg-white rounded-2xl shadow-xl border border-zinc-100 p-4 z-50"
-                >
-                  <h3 className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 mb-3">Review Summary</h3>
-                  {[
-                    ["Needs Your Review", needsReview, "text-zinc-600", "bg-zinc-100"],
-                    ["Approved", approved, "text-emerald-700 font-bold", "bg-emerald-50"],
-                    ["Changes Requested", changes, "text-amber-700 font-bold", "bg-amber-50"],
-                  ].map(([label, val, cls, bg]) => (
-                    <div key={label as string} className={`flex justify-between items-center px-3 py-2 rounded-lg mb-1 ${bg}`}>
-                      <span className="text-xs text-zinc-600">{label}</span>
-                      <span className={`text-sm ${cls}`}>{val}</span>
-                    </div>
-                  ))}
-                  <div className="mt-3 pt-3 border-t border-zinc-100 text-center">
-                     <span className="text-xs font-semibold text-zinc-500">{progress}% reviewed</span>
+          <div className="flex shrink-0 items-center gap-2 sm:gap-4">
+            <div ref={summaryRef} className="relative flex shrink-0 items-center gap-2">
+              <button
+                onClick={() => setSummaryOpen((o) => !o)}
+                className="group flex items-center gap-3"
+                aria-label="Review summary"
+                aria-expanded={summaryOpen}
+                aria-controls="client-review-summary"
+              >
+                <div className="hidden flex-col items-end sm:flex">
+                  <span className="whitespace-nowrap text-xs font-medium text-zinc-500 transition-colors group-hover:text-zinc-950">
+                    {reviewed}/{visiblePosts.length} reviewed
+                  </span>
+                  <div className="rr-client-progress-track mt-1 h-1.5 w-24 overflow-hidden rounded-full">
+                    <div className="h-full rounded-full bg-zinc-950 transition-all duration-700" style={{ width: `${progress}%` }} />
                   </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
+                </div>
+                <div className="flex items-center gap-1.5 sm:hidden">
+                  <div className="rr-client-progress-track h-1.5 w-16 overflow-hidden rounded-full">
+                    <div className="h-full rounded-full bg-zinc-950 transition-all" style={{ width: `${progress}%` }} />
+                  </div>
+                  <span className="text-xs font-medium text-zinc-500">{progress}%</span>
+                </div>
+              </button>
+
+              <AnimatePresence>
+                {summaryOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 6, scale: 0.97 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 6, scale: 0.97 }}
+                    transition={{ duration: 0.15 }}
+                    id="client-review-summary"
+                    className="absolute right-0 top-full z-50 mt-2 w-56 rounded-xl border border-zinc-200 bg-white p-4 shadow-xl"
+                  >
+                    <h3 className="mb-3 text-[10px] font-bold uppercase tracking-[0.18em] text-zinc-400">Review Summary</h3>
+                    {[
+                      ["Needs Your Review", needsReview, "text-zinc-600", "bg-zinc-100"],
+                      ["Approved", approved, "text-emerald-700 font-bold", "bg-emerald-50"],
+                      ["Changes Requested", changes, "text-amber-700 font-bold", "bg-amber-50"],
+                    ].map(([label, val, cls, bg]) => (
+                      <div key={label as string} className={`mb-1 flex items-center justify-between rounded-lg px-3 py-2 ${bg}`}>
+                        <span className="text-xs text-zinc-600">{label}</span>
+                        <span className={`text-sm ${cls}`}>{val}</span>
+                      </div>
+                    ))}
+                    <div className="mt-3 border-t border-zinc-100 pt-3 text-center">
+                      <span className="text-xs font-semibold text-zinc-500">{progress}% reviewed</span>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
             <ClientThemeToggle theme={clientTheme} onToggle={toggleClientTheme} />
           </div>
         </div>
       </header>
 
-      <main className="max-w-4xl mx-auto px-0 sm:px-4 md:px-6 pb-24">
-
-        {/* ── Profile ─────────────────────────────────────── */}
-        <div className="px-4 sm:px-0 pt-8 sm:pt-12 pb-8 sm:pb-10">
-          <div className="flex flex-col sm:flex-row items-center sm:items-start gap-6 sm:gap-10">
-            {/* Avatar */}
+      <main className="mx-auto max-w-5xl px-4 pb-24 sm:px-6 lg:px-8">
+        <section className="border-b border-zinc-200 py-8 sm:py-12">
+          <div className="flex flex-col items-center gap-6 sm:flex-row sm:items-start sm:gap-10">
             <div className="shrink-0">
-              <div className="w-20 h-20 sm:w-28 sm:h-28 md:w-36 md:h-36 rounded-full overflow-hidden border-2 border-zinc-200 ring-1 ring-zinc-100 shadow-sm bg-zinc-100 flex items-center justify-center">
+              <div className="flex h-24 w-24 items-center justify-center overflow-hidden rounded-full border border-zinc-200 bg-zinc-50 p-1 ring-4 ring-zinc-100 sm:h-36 sm:w-36">
                 {logoUrl ? (
                   <img
                     src={logoUrl}
                     alt={displayName}
-                    className="w-full h-full object-cover"
+                    className="h-full w-full rounded-full object-cover"
                     referrerPolicy="no-referrer"
                   />
                 ) : (
@@ -688,84 +682,76 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, r
               </div>
             </div>
 
-            {/* Meta */}
-            <div className="flex-1 text-center sm:text-left min-w-0">
-              <h2 className="text-xl font-semibold leading-tight">{displayName}</h2>
-
-              {/* Stats */}
-              <div className="flex justify-center sm:justify-start gap-6 sm:gap-8 mb-4 text-sm">
-                <span><span className="font-bold text-zinc-900">{visiblePosts.length}</span> <span className="text-zinc-600">posts</span></span>
-                <span><span className="font-bold text-emerald-600">{approved}</span> <span className="text-zinc-600">approved</span></span>
-                <span><span className="font-bold text-amber-600">{changes}</span> <span className="text-zinc-600">changes</span></span>
+            <div className="min-w-0 flex-1 text-center sm:text-left">
+              <h1 className="text-xl font-normal text-zinc-950 sm:text-2xl">{displayName}</h1>
+              <div className="mb-5 mt-5 flex items-center justify-center gap-6 text-sm sm:justify-start sm:gap-10">
+                <span><strong className="font-semibold text-zinc-950">{visiblePosts.length}</strong> <span className="text-zinc-600">posts</span></span>
+                <span><strong className="font-semibold text-zinc-950">{approved}</strong> <span className="text-zinc-600">approved</span></span>
+                <span><strong className="font-semibold text-zinc-950">{changes}</strong> <span className="text-zinc-600">changes</span></span>
               </div>
-
-              {/* Bio */}
-              <div className="text-sm text-zinc-700 max-w-sm mx-auto sm:mx-0">
-                 <p className="text-zinc-500">{bio || "Content review portal · Powered by OSIRIS Review Room"}</p>
-                 {reviewerName && (
-                   <p className="mt-2 text-xs font-medium text-indigo-600">Review shared with {reviewerName}</p>
-                 )}
-                 {needsReview > 0 && (
-                  <p className="mt-2 text-amber-600 font-medium text-xs flex items-center justify-center sm:justify-start gap-1.5">
-                    <AlertCircle className="w-3.5 h-3.5" />
+              <div className="mx-auto max-w-xl space-y-2 text-sm leading-6 text-zinc-700 sm:mx-0">
+                <p>{bio || "Content review portal · Powered by OSIRIS Review Room"}</p>
+                {reviewerName && (
+                  <p className="text-xs font-medium text-zinc-500">Review shared with {reviewerName}</p>
+                )}
+                {needsReview > 0 && (
+                  <p className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700">
+                    <AlertCircle className="h-3.5 w-3.5" />
                     {needsReview} post{needsReview > 1 ? "s" : ""} waiting for your review
                   </p>
                 )}
               </div>
             </div>
           </div>
-        </div>
+        </section>
 
-        {/* ── Tabs ────────────────────────────────────────── */}
-        <div role="tablist" aria-label="Client review views" className="flex border-b border-zinc-200 mb-0.5">
+        <div role="tablist" aria-label="Profile views" className="flex border-b border-zinc-200">
           {[
-             { id: "grid" as const, label: "Content", Icon: Grid3X3 },
-            { id: "schedule" as const, label: "Schedule", Icon: CalendarDays },
+            { id: "grid" as const, label: "Posts", Icon: Grid3X3 },
+            { id: "schedule" as const, label: "Scheduled", Icon: CalendarDays },
           ].map(({ id, label, Icon }) => (
             <button
               key={id}
-               onClick={() => setActiveTab(id)}
-               aria-selected={activeTab === id}
-               role="tab"
-               className={`flex-1 min-h-11 flex items-center justify-center gap-2 py-3 sm:py-4 text-xs font-bold tracking-widest uppercase transition-colors ${activeTab === id
-                ? "text-zinc-900 border-b-2 border-zinc-900 -mb-px"
-                : "text-zinc-500 hover:text-zinc-700"
-                }`}
+              onClick={() => setActiveTab(id)}
+              aria-selected={activeTab === id}
+              role="tab"
+              className={`flex min-h-12 flex-1 items-center justify-center gap-2 border-t-2 px-3 py-3 text-[11px] font-semibold uppercase tracking-[0.18em] transition-colors ${activeTab === id
+                ? "border-zinc-950 text-zinc-950"
+                : "border-transparent text-zinc-400 hover:text-zinc-700"
+              }`}
             >
-              <Icon className="w-4 h-4" />
+              <Icon className="h-4 w-4" />
               <span>{label}</span>
             </button>
           ))}
         </div>
 
-        {/* Selection Toggle */}
         {activeTab === "grid" && sortedPosts.length > 0 && !previewMode && (
-          <div className="px-4 sm:px-0 py-3 border-b border-zinc-100 flex items-center">
-             <button
-                type="button"
-                onClick={() => {
-                  setIsSelectMode(!isSelectMode);
-                  if (isSelectMode) setSelectedIds(new Set());
-                }}
-                aria-label={isSelectMode ? "Cancel post selection" : "Select posts for approval"}
-                aria-pressed={isSelectMode}
-                title={isSelectMode ? "Cancel post selection" : "Choose posts for bulk approval"}
-                className={`rr-client-selection-toggle min-h-11 px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest transition-all border ${isSelectMode ? "bg-indigo-600 border-indigo-600 text-white shadow-lg shadow-indigo-200" : clientTheme === "dark" ? "rr-client-selection-toggle--idle" : "rr-client-selection-toggle--idle bg-white border-zinc-200 text-zinc-600 hover:border-zinc-400"}`}
-              >
-                {isSelectMode ? "Cancel Selection" : "Select Posts"}
-              </button>
+          <div className="flex justify-end py-4">
+            <button
+              type="button"
+              onClick={() => {
+                setIsSelectMode(!isSelectMode);
+                if (isSelectMode) setSelectedIds(new Set());
+              }}
+              aria-label={isSelectMode ? "Cancel post selection" : "Select posts for approval"}
+              aria-pressed={isSelectMode}
+              title={isSelectMode ? "Cancel post selection" : "Choose posts for bulk approval"}
+              className={`min-h-11 rounded-md border px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors ${isSelectMode ? "border-blue-600 bg-blue-600 text-white" : "border-zinc-300 bg-white text-zinc-700 hover:border-zinc-500"}`}
+            >
+              {isSelectMode ? "Cancel" : "Select"}
+            </button>
           </div>
         )}
 
-        {/* ── Grid ────────────────────────────────────────── */}
         {activeTab === "grid" && (
-          <div className="grid grid-cols-3 gap-0.5 sm:gap-1">
+          <div className="grid grid-cols-3 gap-1 sm:gap-2">
             {pagedPosts.map((post: any, i: number) => (
-              <GridTile 
-                key={post.id} 
-                post={post} 
-                index={i} 
-                onClick={() => setActivePostId(post.id)} 
+              <GridTile
+                key={post.id}
+                post={post}
+                index={i}
+                onClick={() => setActivePostId(post.id)}
                 isSelectMode={isSelectMode}
                 isSelected={selectedIds.has(post.id)}
                 onToggleSelect={() => toggleSelect(post.id)}
@@ -773,66 +759,64 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, r
             ))}
             {sortedPosts.length === 0 && (
               <div className="col-span-3 flex flex-col items-center justify-center py-24 text-zinc-400">
-                <ImageOff className="w-12 h-12 mb-4 opacity-25" />
+                <ImageOff className="mb-4 h-12 w-12 opacity-25" />
                 <p className="font-medium">No posts yet</p>
-                <p className="text-sm mt-1 text-zinc-300">Your review package will appear here</p>
+                <p className="mt-1 text-sm text-zinc-400">Your review package will appear here</p>
               </div>
             )}
           </div>
         )}
         {activeTab === "grid" && sortedPosts.length > pagedPosts.length && (
-          <div className="px-4 py-4">
-            <button type="button" onClick={() => setVisibleCount((n) => n + 24)} className="w-full py-2.5 text-xs font-black uppercase tracking-widest text-indigo-600 hover:bg-indigo-50 rounded-xl border border-indigo-100">
+          <div className="py-4">
+            <button type="button" onClick={() => setVisibleCount((n) => n + 24)} className="w-full rounded-md border border-zinc-200 py-2.5 text-xs font-semibold text-zinc-600 transition-colors hover:border-zinc-400 hover:text-zinc-950">
               Show more ({sortedPosts.length - pagedPosts.length})
             </button>
           </div>
         )}
 
-        {/* Bulk Approve Bar */}
         <AnimatePresence>
-            {!previewMode && isSelectMode && selectedIds.size > 0 && (
-            <motion.div 
+          {!previewMode && isSelectMode && selectedIds.size > 0 && (
+            <motion.div
               initial={{ y: 100, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
               exit={{ y: 100, opacity: 0 }}
-              className="rr-client-action-bar fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] text-white rounded-2xl shadow-2xl px-6 py-4 flex items-center gap-6 border border-white/10"
+              className="rr-client-action-bar fixed bottom-6 left-1/2 z-[100] flex -translate-x-1/2 items-center gap-4 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-zinc-950 shadow-2xl sm:gap-6 sm:px-6 sm:py-4"
             >
-              <div className="flex items-center gap-3 pr-6 border-r border-white/10">
-                <div className="w-8 h-8 rounded-lg bg-indigo-500 text-white flex items-center justify-center font-bold text-xs">
+              <div className="flex items-center gap-2 pr-2 sm:pr-5">
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-950 text-xs font-semibold text-white">
                   {selectedIds.size}
                 </div>
-                <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Selected</span>
+                <span className="hidden text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500 sm:block">Selected</span>
               </div>
-              <button 
+              <button
                 onClick={handleBulkApprove}
-                className="rr-client-contrast-action px-6 py-2.5 rounded-xl text-xs font-bold transition-all active:scale-95 shadow-lg flex items-center gap-2"
+                className="rr-client-contrast-action flex items-center gap-2 rounded-lg bg-zinc-950 px-4 py-2.5 text-xs font-semibold text-white transition-colors hover:bg-zinc-800"
               >
-                <CheckCheck className="w-4 h-4" /> Approve All Selected
+                <CheckCheck className="h-4 w-4" /> Approve
               </button>
-               <button type="button" onClick={() => { setIsSelectMode(false); setSelectedIds(new Set()); }} aria-label="Cancel post selection" className="text-zinc-500 hover:text-white transition-colors">
-                <X className="w-5 h-5" />
+              <button type="button" onClick={() => { setIsSelectMode(false); setSelectedIds(new Set()); }} aria-label="Cancel post selection" className="p-2 text-zinc-500 transition-colors hover:text-zinc-950">
+                <X className="h-5 w-5" />
               </button>
             </motion.div>
           )}
         </AnimatePresence>
 
-        {/* ── Schedule ────────────────────────────────────── */}
         {activeTab === "schedule" && (
-          <div className="px-4 sm:px-0 pt-4 space-y-2">
-             {schedulePosts.length === 0 && (
-               <div className="text-center py-16 text-zinc-400">
-                 <CalendarDays className="w-10 h-10 mx-auto mb-3 opacity-30" />
-                 <p className="text-sm">No posts scheduled</p>
-               </div>
-             )}
-             {pagedSchedulePosts.map((post: any, realIdx: number) => {
-               return <ScheduleRow key={post.id} post={post} index={realIdx} onClick={() => setActivePostId(post.id)} />;
-             })}
-             {schedulePosts.length > pagedSchedulePosts.length && (
-               <button type="button" onClick={() => setVisibleCount((n) => n + 24)} className="w-full py-2.5 text-xs font-black uppercase tracking-widest text-indigo-600 hover:bg-indigo-50 rounded-xl border border-indigo-100">
-                 Show more ({schedulePosts.length - pagedSchedulePosts.length})
-               </button>
-             )}
+          <div className="space-y-2 pt-5">
+            {schedulePosts.length === 0 && (
+              <div className="py-16 text-center text-zinc-400">
+                <CalendarDays className="mx-auto mb-3 h-10 w-10 opacity-30" />
+                <p className="text-sm">No posts scheduled</p>
+              </div>
+            )}
+            {pagedSchedulePosts.map((post: any, realIdx: number) => (
+              <ScheduleRow key={post.id} post={post} index={realIdx} onClick={() => setActivePostId(post.id)} />
+            ))}
+            {schedulePosts.length > pagedSchedulePosts.length && (
+              <button type="button" onClick={() => setVisibleCount((n) => n + 24)} className="mt-2 w-full rounded-md border border-zinc-200 py-2.5 text-xs font-semibold text-zinc-600 transition-colors hover:border-zinc-400 hover:text-zinc-950">
+                Show more ({schedulePosts.length - pagedSchedulePosts.length})
+              </button>
+            )}
           </div>
         )}
       </main>
@@ -858,15 +842,16 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, r
               tabIndex={-1}
               aria-modal="true"
               aria-labelledby="client-post-viewer-title"
-              className="
-                bg-white w-full
-                rounded-t-3xl sm:rounded-2xl
-                shadow-2xl
-                max-h-[95vh] sm:max-h-[90vh]
-                sm:max-w-2xl md:max-w-3xl lg:max-w-4xl
-                flex flex-col
-                overflow-hidden
-              "
+               className={`
+                 bg-white w-full
+                 rounded-t-3xl sm:rounded-2xl
+                 shadow-2xl
+                 max-h-[95vh] sm:max-h-[90vh]
+                 sm:max-w-2xl md:max-w-3xl lg:max-w-4xl
+                 flex flex-col
+                 overflow-hidden
+                 ${previewMode ? "pb-20" : ""}
+               `}
               onClick={(e) => e.stopPropagation()}
               onTouchStart={onModalTouchStart}
               onTouchEnd={onModalTouchEnd}
@@ -883,7 +868,7 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, r
                   <button
                     type="button"
                     onClick={() => void copySinglePostClientLink()}
-                    className="w-8 h-8 bg-white/80 backdrop-blur-sm rounded-full flex items-center justify-center text-zinc-600 hover:text-indigo-600 hover:bg-white shadow-sm transition-colors"
+                    className="w-8 h-8 bg-white/80 backdrop-blur-sm rounded-full flex items-center justify-center text-zinc-600 hover:text-blue-600 hover:bg-white shadow-sm transition-colors"
                     title="Copy client link for this post only"
                   >
                     <Share2 className="w-4 h-4" />
@@ -959,7 +944,7 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, r
                       <button
                         type="button"
                         onClick={() => void copySinglePostClientLink()}
-                        className="sm:hidden p-2 text-zinc-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl shrink-0"
+                        className="sm:hidden p-2 text-zinc-500 hover:text-blue-600 hover:bg-blue-50 rounded-xl shrink-0"
                         title="Copy client link for this post only"
                       >
                         <Share2 className="w-5 h-5" />
@@ -982,11 +967,11 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, r
                      {/* Caption */}
                     <div className="p-4 border-b border-zinc-100">
                       {activePost.script && activePost.script.length > 0 && (
-                        <div className="mb-3 p-3 bg-indigo-50 border border-indigo-100 rounded-xl">
-                          <p className="text-[10px] font-bold uppercase tracking-widest text-indigo-500 mb-1.5 flex items-center gap-1">
+                        <div className="mb-3 p-3 bg-blue-50 border border-blue-100 rounded-xl">
+                          <p className="text-[10px] font-bold uppercase tracking-widest text-blue-500 mb-1.5 flex items-center gap-1">
                             <FileText className="w-3 h-3" /> Script
                           </p>
-                          <p className="text-sm text-indigo-900 whitespace-pre-wrap leading-relaxed">
+                          <p className="text-sm text-blue-900 whitespace-pre-wrap leading-relaxed">
                             {activePost.script}
                           </p>
                         </div>
@@ -1055,7 +1040,7 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, r
 
                   <div className="p-4 border-t border-zinc-100 bg-zinc-50/80 space-y-3 shrink-0">
                     {previewMode && (
-                      <div className="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-center text-xs font-semibold text-indigo-700">
+                      <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-center text-xs font-semibold text-blue-700">
                         Preview mode · Client decisions are disabled
                       </div>
                     )}
@@ -1147,7 +1132,7 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, r
                     >
                       <div className="p-4 border-b border-zinc-100 flex items-center justify-between bg-zinc-50">
                          <h3 id="revision-dialog-title" className="font-bold text-zinc-900 flex items-center gap-2">
-                          <MessageSquare className="w-4 h-4 text-indigo-500" />
+                          <MessageSquare className="w-4 h-4 text-blue-500" />
                           Request Revision
                         </h3>
                          <button type="button" onClick={() => setRequestModalOpen(false)} aria-label="Close revision request" className="text-zinc-400 hover:text-zinc-600">
@@ -1164,7 +1149,7 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, r
                               <button
                                 key={type}
                                 onClick={() => setReqChangeType(type)}
-                                className={`py-2 px-3 text-sm font-semibold rounded-xl border transition-all truncate text-center ${reqChangeType === type ? "bg-indigo-50 border-indigo-200 text-indigo-700" : "bg-white border-zinc-200 text-zinc-600 hover:bg-zinc-50"
+                                className={`py-2 px-3 text-sm font-semibold rounded-xl border transition-all truncate text-center ${reqChangeType === type ? "bg-blue-50 border-blue-200 text-blue-700" : "bg-white border-zinc-200 text-zinc-600 hover:bg-zinc-50"
                                   }`}
                               >
                                 {type.charAt(0).toUpperCase() + type.slice(1)}
@@ -1197,7 +1182,7 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, r
                             <select
                               value={reqSlideIndex}
                               onChange={(e) => setReqSlideIndex(e.target.value ? Number(e.target.value) : "")}
-                              className="w-full bg-white border border-zinc-200 px-3 py-2.5 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                              className="w-full bg-white border border-zinc-200 px-3 py-2.5 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                             >
                               <option value="">Whole Post</option>
                               {activePost.mediaUrls.map((_, i) => (
@@ -1215,7 +1200,7 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, r
                             onChange={(e) => setReqText(e.target.value)}
                             placeholder="What needs to be changed?"
                             rows={3}
-                            className="w-full bg-white border border-zinc-200 px-3 py-2.5 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none resize-none"
+                            className="w-full bg-white border border-zinc-200 px-3 py-2.5 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none"
                           />
                         </div>
                       </div>
@@ -1227,7 +1212,7 @@ export default function ClientView({ posts, tenantId, brandName, logoUrl, bio, r
                         <button
                           onClick={submitRevisionRequest}
                           disabled={!reqText.trim() || sendingComment}
-                          className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-md shadow-indigo-200 disabled:opacity-50 transition-all flex items-center gap-2"
+                          className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md shadow-blue-200 disabled:opacity-50 transition-all flex items-center gap-2"
                         >
                           {sendingComment ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                           Submit Revision

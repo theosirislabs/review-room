@@ -6,8 +6,7 @@ export const clientThemeStorageKey = (tenantId: string) =>
   `osiris_client_theme_${tenantId || "review"}`;
 
 function systemTheme(): ClientTheme {
-  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return "light";
-  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  return "light";
 }
 
 export function readClientTheme(tenantId: string): ClientTheme {

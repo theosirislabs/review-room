@@ -158,18 +158,16 @@ export default function DashboardView({
 
     if (!adminToken) {
         return (
-            <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center p-4 selection:bg-indigo-500/30 relative overflow-hidden">
-                <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-indigo-600/10 blur-[120px] rounded-full pointer-events-none" />
-                <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-purple-600/10 blur-[120px] rounded-full pointer-events-none" />
-                
-                <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }} className="w-full max-w-md z-10">
+             <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center p-4 selection:bg-blue-500/30 relative overflow-hidden">
+                 <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(37,99,235,0.12),transparent_42%)] pointer-events-none" />
+                 <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }} className="w-full max-w-md z-10">
                     <div className="flex flex-col items-center mb-10">
                         <div className="mb-6">
                             <OsirisLogo size={80} />
                         </div>
                         <h1 className="text-3xl font-black text-white tracking-tighter mb-2">OSIRIS COMMAND</h1>
                         <div className="flex items-center gap-2 px-3 py-1 bg-zinc-900/50 border border-zinc-800 rounded-full">
-                            <Lock className="w-3 h-3 text-indigo-400" />
+                            <Lock className="w-3 h-3 text-blue-400" />
                             <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500">Secure Administrative Portal</span>
                         </div>
                     </div>
@@ -201,9 +199,9 @@ export default function DashboardView({
                                 setLoginLoading(false);
                             }
                         }}
-                        className="bg-zinc-900/40 backdrop-blur-2xl border border-white/5 p-10 rounded-[2.5rem] shadow-[0_32px_64px_-12px_rgba(0,0,0,0.6)] relative overflow-hidden"
+                         className="bg-zinc-900/70 backdrop-blur-xl border border-zinc-800 p-8 rounded-2xl shadow-[0_24px_70px_-30px_rgba(0,0,0,0.7)] relative overflow-hidden sm:p-10"
                     >
-                        <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 opacity-50" />
+                        <div className="absolute top-0 inset-x-0 h-1 bg-blue-500 opacity-70" />
                         
                         <div className="space-y-6">
                             <div>
@@ -212,7 +210,7 @@ export default function DashboardView({
                                     type="text"
                                     value={username}
                                     onChange={e => setUsername(e.target.value)}
-                                    className="w-full bg-black/40 border border-zinc-800 text-white rounded-2xl px-5 py-4 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500/50 transition-all placeholder:text-zinc-700 text-lg"
+                                     className="w-full bg-zinc-950/50 border border-zinc-700 text-white rounded-lg px-4 py-3.5 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all placeholder:text-zinc-600 text-base"
                                     placeholder="Enter username"
                                     required
                                     autoFocus
@@ -224,7 +222,7 @@ export default function DashboardView({
                                     type="password"
                                     value={password}
                                     onChange={e => setPassword(e.target.value)}
-                                    className="w-full bg-black/40 border border-zinc-800 text-white rounded-2xl px-5 py-4 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500/50 transition-all placeholder:text-zinc-700 text-lg tracking-widest"
+                                     className="w-full bg-zinc-950/50 border border-zinc-700 text-white rounded-lg px-4 py-3.5 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all placeholder:text-zinc-600 text-base tracking-widest"
                                     placeholder="••••••••"
                                     required
                                 />
@@ -232,7 +230,7 @@ export default function DashboardView({
 
                             <button
                                 disabled={loginLoading}
-                                className="w-full group relative flex items-center justify-center gap-3 bg-white text-black font-black rounded-2xl py-4 overflow-hidden transition-all hover:bg-zinc-100 active:scale-[0.98] shadow-2xl shadow-white/5"
+                                 className="w-full group relative flex items-center justify-center gap-3 bg-white text-black font-semibold rounded-lg py-3.5 overflow-hidden transition-colors hover:bg-zinc-100 active:scale-[0.98] shadow-sm"
                             >
                                 {loginLoading ? (
                                     <RefreshCcw className="w-5 h-5 animate-spin" />
@@ -246,7 +244,7 @@ export default function DashboardView({
                             {oidcEnabled && (
                                 <a
                                     href="/api/auth/oidc/login"
-                                    className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-500 border border-indigo-500/50 transition-all"
+                                     className="w-full flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 border border-blue-600 transition-colors"
                                 >
                                     <Shield className="w-4 h-4" />
                                     Sign in with Authentik
@@ -295,20 +293,31 @@ export default function DashboardView({
     };
 
     return (
-        <div className="min-h-screen bg-zinc-950 text-white font-sans selection:bg-indigo-500/30 flex">
+        <div className="rr-agency min-h-screen bg-zinc-950 text-white font-sans selection:bg-blue-500/30 flex">
+            <aside className="hidden w-[72px] shrink-0 flex-col items-center border-r border-zinc-800/80 bg-zinc-950 py-4 lg:flex" aria-label="Agency navigation">
+                <div className="mb-6 rounded-xl p-2 text-blue-400"><OsirisLogo size={28} /></div>
+                <nav className="flex flex-1 flex-col items-center gap-2">
+                    <button onClick={() => { setShowActivity(true); }} className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-600 text-white" aria-label="Command center" title="Command center"><Grid className="h-5 w-5" /></button>
+                    <button onClick={() => { setManagerMode("list"); setShowManager(true); }} className="flex h-11 w-11 items-center justify-center rounded-xl text-zinc-500 transition-colors hover:bg-zinc-900 hover:text-zinc-100" aria-label="Manage workspaces" title="Manage workspaces"><Settings className="h-5 w-5" /></button>
+                    {isSuperAdmin && <button onClick={() => setShowUserModal(true)} className="flex h-11 w-11 items-center justify-center rounded-xl text-zinc-500 transition-colors hover:bg-zinc-900 hover:text-zinc-100" aria-label="User management" title="User management"><Shield className="h-5 w-5" /></button>}
+                    {isSuperAdmin && <button onClick={() => setShowMcpModal(true)} className="flex h-11 w-11 items-center justify-center rounded-xl text-zinc-500 transition-colors hover:bg-zinc-900 hover:text-zinc-100" aria-label="MCP keys" title="MCP keys"><Bot className="h-5 w-5" /></button>}
+                </nav>
+                <button onClick={toggleTheme} className="flex h-11 w-11 items-center justify-center rounded-xl text-zinc-500 transition-colors hover:bg-zinc-900 hover:text-zinc-100" aria-label="Toggle theme" title="Toggle theme">{theme === "dark" ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}</button>
+                <div className="mt-3 flex h-9 w-9 items-center justify-center rounded-full border border-zinc-700 bg-zinc-800 text-[10px] font-bold text-zinc-200">{(currentUser?.username || "YK").slice(0, 2).toUpperCase()}</div>
+            </aside>
             {/* Main content */}
-            <div className="flex-1 flex flex-col min-w-0">
+            <div className="flex min-w-0 flex-1 flex-col">
                 {/* Global Stats Bar (always visible when logged in) */}
                 <div className="border-b border-zinc-800/60 bg-zinc-900/40 backdrop-blur">
-                    <div className="max-w-7xl mx-auto px-6 py-3 flex flex-wrap items-center gap-6">
+                    <div className="mx-auto flex max-w-[1800px] flex-wrap items-center gap-4 px-5 py-2.5">
                         {stats ? (
                             <>
                                 {[
                                     { label: "Total Posts", value: stats.totalPosts, icon: Grid, color: "text-zinc-300" },
                                     { label: "Approved", value: stats.totalApproved, icon: CheckCircle2, color: "text-emerald-400" },
-                                    { label: "Needs Review", value: stats.totalNeedsReview, icon: Clock, color: "text-indigo-400" },
+                                    { label: "Needs Review", value: stats.totalNeedsReview, icon: Clock, color: "text-blue-400" },
                                     { label: "Blocked", value: stats.totalBlocked, icon: AlertCircle, color: "text-red-400" },
-                                    { label: "Scheduled", value: stats.totalScheduled, icon: TrendingUp, color: "text-purple-400" },
+                                     { label: "Scheduled", value: stats.totalScheduled, icon: TrendingUp, color: "text-blue-400" },
                                 ].map(s => {
                                     const Icon = s.icon;
                                     return (
@@ -340,13 +349,12 @@ export default function DashboardView({
                 </div>
 
                 {/* Header */}
-                <div className="max-w-7xl mx-auto w-full px-6 pt-8 pb-6">
+                <div className="mx-auto w-full max-w-[1800px] px-5 pt-5 pb-6">
                     <header className="flex flex-wrap items-center justify-between gap-3 mb-8">
-                        <div className="flex items-center gap-4">
-                            <OsirisLogo size={40} className="shrink-0" />
+                        <div className="flex items-center gap-3">
                             <div>
-                                <h1 className="text-2xl font-black tracking-tight text-white">Osiris Command Center</h1>
-                                <p className="text-zinc-500 text-sm font-medium">Global Agency Dashboard · {tenants.length} client workspace{tenants.length !== 1 ? "s" : ""}</p>
+                                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-600">Osiris Agency</p>
+                                <h1 className="text-xl font-bold tracking-tight text-zinc-100">Command Center</h1>
                             </div>
                         </div>
                         <div className="flex items-center gap-2">
@@ -363,7 +371,7 @@ export default function DashboardView({
                                     value={search}
                                     onChange={e => setSearch(e.target.value)}
                                     placeholder="Search clients..."
-                                    className="bg-zinc-900 border border-zinc-800 text-white text-sm pl-9 pr-4 py-2 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder:text-zinc-600 w-48"
+                                    className="bg-zinc-900 border border-zinc-800 text-white text-sm pl-9 pr-4 py-2 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder:text-zinc-600 w-48"
                                 />
                                 {/* Search Results Dropdown */}
                                 {search.length >= 2 && searchResults && Array.isArray(searchResults) && searchResults.length > 0 && (
@@ -410,7 +418,7 @@ export default function DashboardView({
                             >
                                 <Megaphone className="w-4 h-4" />
                                 {unreadUpdates > 0 && (
-                                    <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full bg-indigo-500 text-[9px] font-black text-white flex items-center justify-center">
+                                    <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full bg-blue-500 text-[9px] font-black text-white flex items-center justify-center">
                                         {unreadUpdates > 9 ? "9+" : unreadUpdates}
                                     </span>
                                 )}
@@ -461,26 +469,26 @@ export default function DashboardView({
                                     onClick={() => onSelectTenant(tenant, "internal", tenant.settings.internalToken || "")}
                                     initial={{ opacity: 0, scale: 0.97 }}
                                     animate={{ opacity: 1, scale: 1 }}
-                                    className="cursor-pointer group relative bg-zinc-900 border border-zinc-800/80 rounded-2xl overflow-hidden hover:border-indigo-500/40 transition-all hover:shadow-2xl hover:shadow-indigo-500/10 flex flex-col"
+                                     className="group relative flex cursor-pointer flex-col overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900 transition-[border-color,box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:border-blue-500/50 hover:shadow-lg"
                                 >
                                     {/* Top gradient on hover */}
-                                    <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/5 to-purple-500/5 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity duration-500" />
+                                     <div className="absolute inset-0 bg-blue-500/5 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity duration-500" />
 
                                     {/* Top section */}
-                                    <div className="p-5 flex items-start justify-between">
+                                     <div className="flex items-start justify-between p-4">
                                         <div className="flex items-center gap-3">
                                             {tenant.logoUrl ? (
-                                                <img
-                                                    src={tenant.logoUrl}
-                                                    alt={`${tenant.name} logo`}
-                                                    className="w-12 h-12 rounded-xl object-cover shadow-lg border border-zinc-800"
+                                                 <img
+                                                     src={tenant.logoUrl}
+                                                     alt={`${tenant.name} logo`}
+                                                     className="h-10 w-10 rounded-lg border border-zinc-700 object-cover"
                                                     onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; (e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden'); }}
                                                 />
                                             ) : (
-                                                <OsirisLogo size={48} className="rounded-xl shadow-lg border border-zinc-800 shrink-0" />
+                                                 <OsirisLogo size={40} className="shrink-0 rounded-lg border border-zinc-700" />
                                             )}
                                             <div>
-                                                <h2 className="text-base font-black text-white group-hover:text-indigo-300 transition-colors">{tenant.name}</h2>
+                                                <h2 className="text-base font-black text-white group-hover:text-blue-300 transition-colors">{tenant.name}</h2>
                                                 <div className="flex items-center gap-2 mt-0.5">
                                                     <p className="text-zinc-600 text-[10px] font-mono uppercase tracking-tight">{tenant.id}</p>
                                                     <span className="text-zinc-800 text-[10px]">/</span>
@@ -512,13 +520,13 @@ export default function DashboardView({
 
                                     {/* Stats row */}
                                     {ts && (
-                                        <div className="px-5 pb-4 grid grid-cols-3 gap-2">
+                                         <div className="grid grid-cols-3 gap-1.5 px-4 pb-3">
                                             {[
                                                 { label: "Posts", value: ts.total, color: "text-zinc-300" },
-                                                { label: "Review", value: ts.needsReview, color: "text-indigo-400" },
+                                                { label: "Review", value: ts.needsReview, color: "text-blue-400" },
                                                 { label: "Blocked", value: ts.blocked, color: ts.blocked > 0 ? "text-red-400" : "text-zinc-600" },
                                             ].map(s => (
-                                                <div key={s.label} className="bg-zinc-950/60 rounded-xl px-2 py-2 text-center">
+                                                 <div key={s.label} className="rounded-lg bg-zinc-950/70 px-2 py-2 text-center">
                                                     <div className={`text-base font-black ${s.color}`}>{s.value}</div>
                                                     <div className="text-[9px] font-bold uppercase tracking-wider text-zinc-600 mt-0.5">{s.label}</div>
                                                 </div>
@@ -527,7 +535,7 @@ export default function DashboardView({
                                     )}
 
                                     {/* Action buttons */}
-                                    <div className="px-5 pb-5 mt-auto">
+                                     <div className="mt-auto border-t border-zinc-800/80 px-4 py-3">
                                         <div className="flex items-center gap-1 mb-2.5">
                                             <div className="flex-1 h-px bg-zinc-800/50" />
                                             <span className="text-[9px] uppercase font-bold tracking-widest text-zinc-700">Access Links</span>
@@ -538,7 +546,7 @@ export default function DashboardView({
                                                  variant="outline"
                                                  onClick={(e) => copyAgencyLink(e, tenant)}
                                                  icon={<Grid className="w-3.5 h-3.5" />}
-                                                 className="w-full text-xs py-2 hover:border-indigo-500/40 hover:text-indigo-300"
+                                                 className="w-full text-xs py-2 hover:border-blue-500/40 hover:text-blue-300"
                                              >
                                                  Agency link
                                              </Button>
@@ -553,7 +561,7 @@ export default function DashboardView({
                                         </div>
 
                                         {/* Token rotation & delete — hover reveal (super-admin only) */}
-                                        <div className="flex items-center gap-1 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                         <div className="mt-2 flex items-center gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
                                             {isSuperAdmin && (
                                                 <Button
                                                     variant="ghost"
@@ -569,7 +577,7 @@ export default function DashboardView({
                                                 variant="primary"
                                                 size="sm"
                                                 onClick={(e) => { e.stopPropagation(); onSelectTenant(tenant, "internal", tenant.settings.internalToken || ""); }}
-                                                className="flex-[2] bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400 border border-indigo-500/20 shadow-none"
+                                                className="flex-[2] bg-blue-600/10 hover:bg-blue-600/20 text-blue-400 border border-blue-500/20 shadow-none"
                                             >
                                                 Open <ChevronRight className="w-3 h-3 ml-1" />
                                             </Button>
@@ -594,7 +602,7 @@ export default function DashboardView({
                         <button
                             type="button"
                             onClick={() => setTenantShown((n) => n + 12)}
-                            className="mt-4 w-full py-2.5 text-xs font-black uppercase tracking-widest text-indigo-400 hover:bg-indigo-950/40 rounded-xl border border-indigo-900/60"
+                            className="mt-4 w-full py-2.5 text-xs font-black uppercase tracking-widest text-blue-400 hover:bg-blue-950/40 rounded-xl border border-blue-900/60"
                         >
                             Show more ({filteredTenants.length - tenantShown})
                         </button>
@@ -617,7 +625,7 @@ export default function DashboardView({
                         initial={{ width: 0, opacity: 0 }}
                         animate={{ width: 280, opacity: 1 }}
                         exit={{ width: 0, opacity: 0 }}
-                        className="hidden xl:flex flex-col border-l border-zinc-800/60 bg-zinc-900/30 shrink-0 overflow-hidden"
+                         className="hidden w-[280px] shrink-0 overflow-hidden border-l border-zinc-800/60 bg-zinc-900/30 xl:flex xl:flex-col"
                         style={{ width: 280 }}
                     >
                         <ActivityFeed adminToken={adminToken} liveEvents={liveEvents} />

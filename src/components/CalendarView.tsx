@@ -8,11 +8,11 @@ const STATUS_DOT: Record<string, string> = {
   Concept: "bg-zinc-400",
   Draft: "bg-blue-500",
   "Internal QA": "bg-amber-500",
-  "Ready for Client": "bg-indigo-500",
+  "Ready for Client": "bg-blue-500",
   "Changes Requested": "bg-red-500",
   Approved: "bg-emerald-500",
   "Ready to Schedule": "bg-violet-500",
-  Scheduled: "bg-purple-600",
+   Scheduled: "bg-blue-600",
   Posted: "bg-zinc-900",
 };
 
@@ -94,7 +94,7 @@ function EventPill({ event, compact = false, onOpen }: { event: CalendarEvent; c
     <button
       type="button"
       onClick={onOpen}
-      className={`w-full text-left border rounded-lg transition-colors hover:brightness-[0.97] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 ${kindClass} ${compact ? "px-1.5 py-1" : "px-3 py-2.5"}`}
+      className={`w-full text-left border rounded-lg transition-colors hover:brightness-[0.97] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 ${kindClass} ${compact ? "px-1.5 py-1" : "px-3 py-2.5"}`}
       aria-label={`Open ${event.post.title}. ${eventSummary(event)}.`}
     >
       <span className="flex items-start gap-1.5 min-w-0">
@@ -189,7 +189,7 @@ export default function CalendarView({ posts, onOpenPost, onCreatePostForDate, o
     <section className="space-y-5" aria-labelledby="calendar-title" data-testid="agency-calendar">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
         <div>
-          <div className="flex items-center gap-2 text-indigo-600 mb-1">
+          <div className="flex items-center gap-2 text-blue-600 mb-1">
             <CalendarDays className="w-4 h-4" aria-hidden="true" />
             <span className="text-[10px] font-black uppercase tracking-[0.18em]">Content operations</span>
           </div>
@@ -198,19 +198,19 @@ export default function CalendarView({ posts, onOpenPost, onCreatePostForDate, o
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {canCreate && onCreatePostForDate && (
-            <button type="button" onClick={() => onCreatePostForDate(selectedDate)} className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white shadow-sm transition-colors hover:bg-indigo-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600">
+            <button type="button" onClick={() => onCreatePostForDate(selectedDate)} className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white shadow-sm transition-colors hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600">
               <Plus className="w-4 h-4" /> New post for {formatDate(selectedDate, { month: "short", day: "numeric" })}
             </button>
           )}
           <label className="sr-only" htmlFor="calendar-jump-date">Jump to date</label>
-          <input id="calendar-jump-date" type="date" value={selectedDate} onChange={(event) => setMonthForDate(event.target.value)} className="min-h-10 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs font-bold text-zinc-700 outline-none transition-shadow focus:ring-2 focus:ring-indigo-500/30" />
+          <input id="calendar-jump-date" type="date" value={selectedDate} onChange={(event) => setMonthForDate(event.target.value)} className="min-h-10 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs font-bold text-zinc-700 outline-none transition-shadow focus:ring-2 focus:ring-blue-500/30" />
         </div>
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <CalendarMetric label="Scheduled this month" value={scheduledThisMonth} tone="text-violet-700" onClick={() => setEventFilter("scheduled")} />
         <CalendarMetric label="Feedback due" value={dueThisMonth} tone="text-amber-700" onClick={() => setEventFilter("feedback-due")} />
-        <CalendarMetric label="Ready to schedule" value={health.readyToSchedule.length} tone="text-indigo-700" onClick={() => setEventFilter("all")} />
+        <CalendarMetric label="Ready to schedule" value={health.readyToSchedule.length} tone="text-blue-700" onClick={() => setEventFilter("all")} />
         <CalendarMetric label="Needs attention" value={health.blocked.length + health.overdueFeedback.length + health.missingScheduleTime.length} tone="text-red-600" onClick={() => setEventFilter("attention")} />
       </div>
 
@@ -218,29 +218,29 @@ export default function CalendarView({ posts, onOpenPost, onCreatePostForDate, o
         <div className="border-b border-zinc-100 px-4 py-4 sm:px-5">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-center gap-1.5">
-              <button type="button" onClick={() => moveMonth(-1)} className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-xl text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600" aria-label={`Show ${new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" }).format(new Date(year, month - 1, 1))}`}>
+              <button type="button" onClick={() => moveMonth(-1)} className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-xl text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600" aria-label={`Show ${new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" }).format(new Date(year, month - 1, 1))}`}>
                 <ChevronLeft className="w-5 h-5" />
               </button>
-              <button type="button" onClick={() => setMonthForDate(todayKey)} className="min-h-10 rounded-xl px-3 text-sm font-black text-zinc-900 transition-colors hover:bg-zinc-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600">
+              <button type="button" onClick={() => setMonthForDate(todayKey)} className="min-h-10 rounded-xl px-3 text-sm font-black text-zinc-900 transition-colors hover:bg-zinc-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600">
                 {monthLabel}
               </button>
-              <button type="button" onClick={() => moveMonth(1)} className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-xl text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600" aria-label={`Show ${new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" }).format(new Date(year, month + 1, 1))}`}>
+              <button type="button" onClick={() => moveMonth(1)} className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-xl text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600" aria-label={`Show ${new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" }).format(new Date(year, month + 1, 1))}`}>
                 <ChevronRight className="w-5 h-5" />
               </button>
-              <button type="button" onClick={() => setMonthForDate(todayKey)} className="min-h-10 rounded-xl px-3 text-xs font-bold text-indigo-700 hover:bg-indigo-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600">Today</button>
+              <button type="button" onClick={() => setMonthForDate(todayKey)} className="min-h-10 rounded-xl px-3 text-xs font-bold text-blue-700 hover:bg-blue-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600">Today</button>
             </div>
 
             <div className="flex flex-wrap items-center gap-2" aria-label="Calendar filters">
               <ListFilter className="w-4 h-4 text-zinc-400" aria-hidden="true" />
-              <select aria-label="Filter calendar events" value={eventFilter} onChange={(event) => setEventFilter(event.target.value as EventFilter)} className="min-h-10 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs font-bold text-zinc-700 outline-none focus:ring-2 focus:ring-indigo-500/30">
+              <select aria-label="Filter calendar events" value={eventFilter} onChange={(event) => setEventFilter(event.target.value as EventFilter)} className="min-h-10 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs font-bold text-zinc-700 outline-none focus:ring-2 focus:ring-blue-500/30">
                 <option value="all">All events</option>
                 <option value="scheduled">Scheduled</option>
                 <option value="planned">Planned</option>
                 <option value="feedback-due">Feedback due</option>
                 <option value="attention">Needs attention</option>
               </select>
-              {campaigns.length > 0 && <select aria-label="Filter calendar by campaign" value={campaignFilter} onChange={(event) => setCampaignFilter(event.target.value)} className="min-h-10 max-w-[170px] rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs font-bold text-zinc-700 outline-none focus:ring-2 focus:ring-indigo-500/30"><option value="">All campaigns</option>{campaigns.map((campaign) => <option key={campaign} value={campaign}>{campaign}</option>)}</select>}
-              {assignees.length > 0 && <select aria-label="Filter calendar by assignee" value={assigneeFilter} onChange={(event) => setAssigneeFilter(event.target.value)} className="min-h-10 max-w-[170px] rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs font-bold text-zinc-700 outline-none focus:ring-2 focus:ring-indigo-500/30"><option value="">All assignees</option>{assignees.map((assignee) => <option key={assignee} value={assignee}>{assignee}</option>)}</select>}
+              {campaigns.length > 0 && <select aria-label="Filter calendar by campaign" value={campaignFilter} onChange={(event) => setCampaignFilter(event.target.value)} className="min-h-10 max-w-[170px] rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs font-bold text-zinc-700 outline-none focus:ring-2 focus:ring-blue-500/30"><option value="">All campaigns</option>{campaigns.map((campaign) => <option key={campaign} value={campaign}>{campaign}</option>)}</select>}
+              {assignees.length > 0 && <select aria-label="Filter calendar by assignee" value={assigneeFilter} onChange={(event) => setAssigneeFilter(event.target.value)} className="min-h-10 max-w-[170px] rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs font-bold text-zinc-700 outline-none focus:ring-2 focus:ring-blue-500/30"><option value="">All assignees</option>{assignees.map((assignee) => <option key={assignee} value={assignee}>{assignee}</option>)}</select>}
               {activeFilters && <button type="button" onClick={resetFilters} className="min-h-10 rounded-xl px-3 text-xs font-bold text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900">Clear</button>}
             </div>
           </div>
@@ -260,13 +260,13 @@ export default function CalendarView({ posts, onOpenPost, onCreatePostForDate, o
                 const isToday = currentDate === todayKey;
                 const shown = dayEvents.slice(0, 3);
                 return (
-                  <div key={currentDate} role="gridcell" aria-selected={isSelected} className={`min-h-32 border-b border-r border-zinc-100 p-1.5 transition-colors ${isSelected ? "bg-indigo-50/70" : "bg-white hover:bg-zinc-50"}`}>
-                    <button type="button" onClick={() => setSelectedDate(currentDate)} className={`mb-1 inline-flex min-h-7 min-w-7 items-center justify-center rounded-full px-1 text-xs font-black transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 ${isToday ? "bg-indigo-600 text-white" : isSelected ? "bg-indigo-100 text-indigo-800" : "text-zinc-600 hover:bg-zinc-100"}`} aria-label={`Show agenda for ${formatDate(currentDate, { weekday: "long", month: "long", day: "numeric", year: "numeric" })}${dayEvents.length ? `, ${dayEvents.length} event${dayEvents.length === 1 ? "" : "s"}` : ""}`}>
+                  <div key={currentDate} role="gridcell" aria-selected={isSelected} className={`min-h-32 border-b border-r border-zinc-100 p-1.5 transition-colors ${isSelected ? "bg-blue-50/70" : "bg-white hover:bg-zinc-50"}`}>
+                    <button type="button" onClick={() => setSelectedDate(currentDate)} className={`mb-1 inline-flex min-h-7 min-w-7 items-center justify-center rounded-full px-1 text-xs font-black transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 ${isToday ? "bg-blue-600 text-white" : isSelected ? "bg-blue-100 text-blue-800" : "text-zinc-600 hover:bg-zinc-100"}`} aria-label={`Show agenda for ${formatDate(currentDate, { weekday: "long", month: "long", day: "numeric", year: "numeric" })}${dayEvents.length ? `, ${dayEvents.length} event${dayEvents.length === 1 ? "" : "s"}` : ""}`}>
                       {day}
                     </button>
                     <div className="space-y-1">
                       {shown.map((event) => <EventPill key={`${event.postId}:${event.date}`} event={event} compact onOpen={() => onOpenPost(event.post)} />)}
-                      {dayEvents.length > shown.length && <button type="button" onClick={() => setSelectedDate(currentDate)} className="w-full rounded-md px-1.5 py-1 text-left text-[10px] font-bold text-indigo-700 hover:bg-indigo-100">+{dayEvents.length - shown.length} more</button>}
+                      {dayEvents.length > shown.length && <button type="button" onClick={() => setSelectedDate(currentDate)} className="w-full rounded-md px-1.5 py-1 text-left text-[10px] font-bold text-blue-700 hover:bg-blue-100">+{dayEvents.length - shown.length} more</button>}
                     </div>
                   </div>
                 );
@@ -284,7 +284,7 @@ export default function CalendarView({ posts, onOpenPost, onCreatePostForDate, o
               <h3 id="agenda-title" className="mt-1 text-lg font-black text-zinc-900">{formatDate(selectedDate, { weekday: "long", month: "long", day: "numeric" })}</h3>
               <p className="mt-1 text-xs font-medium text-zinc-500">{selectedEvents.length ? `${selectedEvents.length} item${selectedEvents.length === 1 ? "" : "s"} in the current view.` : "No items match the current filters."}</p>
             </div>
-            {canCreate && onCreatePostForDate && <button type="button" onClick={() => onCreatePostForDate(selectedDate)} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-700 transition-colors hover:bg-indigo-100"><Plus className="w-4 h-4" /> Add post</button>}
+            {canCreate && onCreatePostForDate && <button type="button" onClick={() => onCreatePostForDate(selectedDate)} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700 transition-colors hover:bg-blue-100"><Plus className="w-4 h-4" /> Add post</button>}
           </div>
 
           <div className="mt-5 space-y-2">
@@ -315,25 +315,25 @@ export default function CalendarView({ posts, onOpenPost, onCreatePostForDate, o
             </section>
           )}
 
-          <section className="rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4">
+          <section className="rounded-2xl border border-blue-100 bg-blue-50/60 p-4">
             <div className="flex items-start gap-3">
-              <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-indigo-600" aria-hidden="true" />
+              <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-blue-600" aria-hidden="true" />
               <div className="min-w-0 flex-1">
-                <h3 className="text-sm font-black text-indigo-900">Ready-to-schedule queue</h3>
-                <p className="mt-1 text-xs text-indigo-700">Move approved creative into the selected day without leaving the calendar.</p>
+                <h3 className="text-sm font-black text-blue-900">Ready-to-schedule queue</h3>
+                <p className="mt-1 text-xs text-blue-700">Move approved creative into the selected day without leaving the calendar.</p>
               </div>
             </div>
             <div className="mt-3 space-y-2">
               {readyQueue.length > 0 ? readyQueue.map((post) => (
-                <div key={post.id} className="rounded-xl border border-indigo-100 bg-white/90 p-3">
+                <div key={post.id} className="rounded-xl border border-blue-100 bg-white/90 p-3">
                   <p className="truncate text-xs font-black text-zinc-900">{post.title}</p>
                   <p className="mt-0.5 text-[10px] font-semibold text-zinc-500">{post.time || "12:00 PM"} · {FORMAT_LABEL[post.format] || post.format}</p>
                   <div className="mt-2 flex gap-2">
-                    <button type="button" onClick={() => onOpenPost(post)} className="min-h-8 rounded-lg px-2 text-[10px] font-bold text-indigo-700 hover:bg-indigo-50">Review</button>
-                    {canSchedule && onSchedulePost && <button type="button" onClick={() => onSchedulePost(post, selectedDate)} className="ml-auto inline-flex min-h-8 items-center gap-1 rounded-lg bg-indigo-600 px-2.5 text-[10px] font-bold text-white hover:bg-indigo-700"><Clock3 className="h-3 w-3" /> Schedule</button>}
+                    <button type="button" onClick={() => onOpenPost(post)} className="min-h-8 rounded-lg px-2 text-[10px] font-bold text-blue-700 hover:bg-blue-50">Review</button>
+                    {canSchedule && onSchedulePost && <button type="button" onClick={() => onSchedulePost(post, selectedDate)} className="ml-auto inline-flex min-h-8 items-center gap-1 rounded-lg bg-blue-600 px-2.5 text-[10px] font-bold text-white hover:bg-blue-700"><Clock3 className="h-3 w-3" /> Schedule</button>}
                   </div>
                 </div>
-              )) : <p className="rounded-xl border border-dashed border-indigo-200 px-3 py-4 text-center text-xs font-medium text-indigo-700">No approved posts are waiting for a schedule.</p>}
+              )) : <p className="rounded-xl border border-dashed border-blue-200 px-3 py-4 text-center text-xs font-medium text-blue-700">No approved posts are waiting for a schedule.</p>}
             </div>
           </section>
         </aside>

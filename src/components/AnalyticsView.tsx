@@ -131,7 +131,7 @@ export default function AnalyticsView({ tenantId, adminToken, brandName }: Props
 
     if (!data) {
         return (
-            <div className="text-center py-16 text-zinc-400 bg-white rounded-3xl border border-zinc-100" role="alert">
+             <div className="rounded-2xl border border-zinc-200 bg-white px-6 py-16 text-center text-zinc-500" role="alert">
                 <CircleAlert className="w-7 h-7 mx-auto text-red-400" aria-hidden="true" />
                 <p className="font-medium">Analytics unavailable</p>
                 <p className="text-sm mt-1">{error || "Could not load this workspace’s performance data."}</p>
@@ -152,7 +152,7 @@ export default function AnalyticsView({ tenantId, adminToken, brandName }: Props
     const pressureCards = [
         { label: "Blocked", value: operational.blocked, tone: operational.blocked ? "bg-red-50 text-red-800 border-red-100" : "bg-white text-zinc-700 border-zinc-100" },
         { label: "Feedback overdue", value: operational.overdueFeedback, tone: operational.overdueFeedback ? "bg-amber-50 text-amber-800 border-amber-100" : "bg-white text-zinc-700 border-zinc-100" },
-        { label: "Ready to schedule", value: operational.readyToSchedule, tone: operational.readyToSchedule ? "bg-indigo-50 text-indigo-800 border-indigo-100" : "bg-white text-zinc-700 border-zinc-100" },
+        { label: "Ready to schedule", value: operational.readyToSchedule, tone: operational.readyToSchedule ? "bg-blue-50 text-blue-800 border-blue-100" : "bg-white text-zinc-700 border-zinc-100" },
         { label: "Missing schedule time", value: operational.missingScheduleTime, tone: operational.missingScheduleTime ? "bg-red-50 text-red-800 border-red-100" : "bg-white text-zinc-700 border-zinc-100" },
     ];
 
@@ -175,7 +175,7 @@ export default function AnalyticsView({ tenantId, adminToken, brandName }: Props
                     <button onClick={load} title="Refresh" className="p-2 bg-zinc-100 hover:bg-zinc-200 rounded-xl transition-colors">
                         <RefreshCcw className={`w-4 h-4 text-zinc-500 ${loading ? "animate-spin" : ""}`} />
                     </button>
-                    <button onClick={downloadCSV} className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-xl text-xs font-bold transition-colors">
+                    <button onClick={downloadCSV} className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-xl text-xs font-bold transition-colors">
                         <Download className="w-3.5 h-3.5" /> Export CSV
                     </button>
                 </div>
@@ -194,7 +194,7 @@ export default function AnalyticsView({ tenantId, adminToken, brandName }: Props
 
             <section className="rounded-2xl border border-zinc-100 bg-zinc-50/70 p-4 sm:p-5" aria-labelledby="operational-pressure-title">
                 <div className="flex items-start gap-3">
-                    <CalendarClock className="mt-0.5 h-5 w-5 text-indigo-600" aria-hidden="true" />
+                    <CalendarClock className="mt-0.5 h-5 w-5 text-blue-600" aria-hidden="true" />
                     <div>
                         <h3 id="operational-pressure-title" className="text-sm font-black text-zinc-900">Operational pressure</h3>
                         <p className="mt-0.5 text-xs text-zinc-500">Work that needs an agency decision or follow-through now.</p>
@@ -230,7 +230,7 @@ export default function AnalyticsView({ tenantId, adminToken, brandName }: Props
                     </div>
                     <div className="mt-4 grid grid-cols-3 gap-2 w-full text-center text-[10px] font-bold uppercase tracking-wider">
                         <div><div className="text-emerald-500 text-lg font-black">{data.clientStatus.approved}</div><div className="text-zinc-400">Approved</div></div>
-                        <div><div className="text-indigo-500 text-lg font-black">{data.clientStatus.needsReview}</div><div className="text-zinc-400">Review</div></div>
+                        <div><div className="text-blue-500 text-lg font-black">{data.clientStatus.needsReview}</div><div className="text-zinc-400">Review</div></div>
                         <div><div className="text-red-500 text-lg font-black">{data.clientStatus.changesRequested}</div><div className="text-zinc-400">Changes</div></div>
                     </div>
                 </div>
