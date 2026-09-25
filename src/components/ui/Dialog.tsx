@@ -46,7 +46,7 @@ export default function Dialog({
   };
 
   const focusDialog = () => {
-    panelRef.current?.focus();
+    if (panelRef.current && !panelRef.current.contains(document.activeElement)) panelRef.current.focus();
   };
 
   useEffect(() => {

@@ -42,7 +42,7 @@ describe("ShareClientLinkModal", () => {
     const nameInput = screen.getByRole("textbox", { name: /Reviewer's name/ });
     await user.type(nameInput, "Jordan Lee");
     await user.click(screen.getByRole("checkbox", { name: /Remember this reviewer's name/ }));
-    expect(copyButton).toHaveProperty("disabled", false);
+    await waitFor(() => expect(copyButton).toHaveProperty("disabled", false));
 
     await user.click(copyButton);
 

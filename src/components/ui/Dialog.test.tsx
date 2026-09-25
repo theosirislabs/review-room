@@ -22,7 +22,7 @@ describe("Dialog", () => {
     const dialog = screen.getByRole("dialog", { name: "Review settings" });
     expect(dialog).not.toBeNull();
     expect(screen.getByText("Update this workspace.")).not.toBeNull();
-    await waitFor(() => expect(document.activeElement).toBe(dialog));
+    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
     await user.tab();
     expect(dialog.contains(document.activeElement)).toBe(true);
     await user.tab({ shift: true });
