@@ -584,7 +584,7 @@ function AppContent() {
     return (
       <>
         <GridSkeleton client={renderClientSurface} />
-        <div className="fixed bottom-4 left-4 z-[200] flex items-center gap-2 px-3 py-1.5 bg-zinc-900/90 text-white rounded-full text-[10px] font-bold">
+        <div className="fixed bottom-4 left-4 z-[200] hidden items-center gap-2 rounded-full bg-zinc-900/90 px-3 py-1.5 text-[10px] font-bold text-white sm:flex">
           <Loader2 className="w-3 h-3 animate-spin" /> LOAD
         </div>
       </>
@@ -682,7 +682,7 @@ function AppContent() {
 
       {/* Sync indicator */}
       <div
-        className={`fixed bottom-4 left-4 z-[200] flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wider uppercase transition-all ${connected
+        className={`fixed bottom-4 left-4 z-[200] hidden items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider transition-all sm:flex ${connected
           ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20"
           : "bg-red-500/10 text-red-500 border border-red-500/20"
           }`}

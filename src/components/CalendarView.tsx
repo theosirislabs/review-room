@@ -137,6 +137,7 @@ export default function CalendarView({ posts, onOpenPost, onCreatePostForDate, o
     && (!campaignFilter || event.post.campaignCode === campaignFilter)
     && (!assigneeFilter || event.post.assignee === assigneeFilter)
   )), [events, eventFilter, campaignFilter, assigneeFilter]);
+  const datedItems = useMemo(() => [...visibleEvents].sort((a, b) => a.date.localeCompare(b.date)), [visibleEvents]);
   const eventsByDate = useMemo(() => {
     const next = new Map<string, CalendarEvent[]>();
     for (const event of visibleEvents) {
@@ -148,6 +149,9 @@ export default function CalendarView({ posts, onOpenPost, onCreatePostForDate, o
   }, [visibleEvents]);
 
   const monthEvents = useMemo(() => visibleEvents.filter((event) => event.date.startsWith(monthPrefix)), [visibleEvents, monthPrefix]);
+  const upcomingDatedItem = datedItems.find((event) => event.date >= todayKey) ?? null;
+  const jumpDatedItem = upcomingDatedItem ?? datedItems[0] ?? null;
+  const jumpDatedItemIsUpcoming = upcomingDatedItem !== null;
   const scheduledThisMonth = useMemo(() => new Set(monthEvents.filter((event) => event.kinds.includes("scheduled")).map((event) => event.postId)).size, [monthEvents]);
   const dueThisMonth = useMemo(() => new Set(monthEvents.filter((event) => event.kinds.includes("feedback-due")).map((event) => event.postId)).size, [monthEvents]);
   const selectedEvents = eventsByDate.get(selectedDate) || [];
@@ -244,9 +248,21 @@ export default function CalendarView({ posts, onOpenPost, onCreatePostForDate, o
               {activeFilters && <button type="button" onClick={resetFilters} className="min-h-10 rounded-xl px-3 text-xs font-bold text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900">Clear</button>}
             </div>
           </div>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-zinc-100 pt-3">
+            <span className="text-xs text-zinc-500">Showing {datedItems.length} dated item{datedItems.length === 1 ? "" : "s"}{activeFilters ? " with the current filters" : ""}.</span>
+            {jumpDatedItem && monthEvents.length === 0 && (
+              <button
+                type="button"
+                onClick={() => setMonthForDate(jumpDatedItem.date)}
+                className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-2.5 text-[11px] font-bold text-blue-700 transition-colors hover:bg-blue-100"
+              >
+                {jumpDatedItemIsUpcoming ? "Jump to next dated item" : "Jump to earliest dated item"} · {formatDate(jumpDatedItem.date, { month: "short", day: "numeric", year: "numeric" })}
+              </button>
+            )}
+          </div>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="hidden overflow-x-auto md:block">
           <div className="min-w-[760px]" role="grid" aria-label={`${monthLabel} content calendar`}>
             <div className="grid grid-cols-7 border-b border-zinc-100 bg-zinc-50/70" role="row">
               {WEEKDAYS.map((weekday) => <div key={weekday} role="columnheader" className="px-2 py-2.5 text-center text-[10px] font-black uppercase tracking-[0.16em] text-zinc-400">{weekday}</div>)}
@@ -260,7 +276,23 @@ export default function CalendarView({ posts, onOpenPost, onCreatePostForDate, o
                 const isToday = currentDate === todayKey;
                 const shown = dayEvents.slice(0, 3);
                 return (
-                  <div key={currentDate} role="gridcell" aria-selected={isSelected} className={`min-h-32 border-b border-r border-zinc-100 p-1.5 transition-colors ${isSelected ? "bg-blue-50/70" : "bg-white hover:bg-zinc-50"}`}>
+                  <div
+                    key={currentDate}
+                    role="gridcell"
+                    tabIndex={0}
+                    aria-selected={isSelected}
+                    aria-label={`Show agenda for ${formatDate(currentDate, { weekday: "long", month: "long", day: "numeric", year: "numeric" })}${dayEvents.length ? `, ${dayEvents.length} event${dayEvents.length === 1 ? "" : "s"}` : ""}`}
+                    onClick={(event) => {
+                      if ((event.target as HTMLElement).closest("button")) return;
+                      setSelectedDate(currentDate);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter" && event.key !== " ") return;
+                      event.preventDefault();
+                      setSelectedDate(currentDate);
+                    }}
+                    className={`min-h-32 border-b border-r border-zinc-100 p-1.5 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 ${isSelected ? "bg-blue-50/70" : "bg-white hover:bg-zinc-50"}`}
+                  >
                     <button type="button" onClick={() => setSelectedDate(currentDate)} className={`mb-1 inline-flex min-h-7 min-w-7 items-center justify-center rounded-full px-1 text-xs font-black transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 ${isToday ? "bg-blue-600 text-white" : isSelected ? "bg-blue-100 text-blue-800" : "text-zinc-600 hover:bg-zinc-100"}`} aria-label={`Show agenda for ${formatDate(currentDate, { weekday: "long", month: "long", day: "numeric", year: "numeric" })}${dayEvents.length ? `, ${dayEvents.length} event${dayEvents.length === 1 ? "" : "s"}` : ""}`}>
                       {day}
                     </button>
@@ -273,6 +305,21 @@ export default function CalendarView({ posts, onOpenPost, onCreatePostForDate, o
               })}
             </div>
           </div>
+        </div>
+        <div className="space-y-2 p-3 md:hidden">
+          <div className="flex items-center justify-between gap-2 px-1">
+            <h3 className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500">Dated items</h3>
+            <span className="text-[11px] text-zinc-400">{datedItems.length} total</span>
+          </div>
+          {datedItems.length > 0 ? datedItems.slice(0, 50).map((event) => (
+            <EventPill key={`${event.postId}:${event.date}`} event={event} onOpen={() => onOpenPost(event.post)} />
+          )) : (
+            <div className="rounded-xl border border-dashed border-zinc-200 px-4 py-8 text-center">
+              <CalendarDays className="mx-auto h-6 w-6 text-zinc-300" aria-hidden="true" />
+              <p className="mt-2 text-sm font-bold text-zinc-500">No dated items match</p>
+              <p className="mt-1 text-xs text-zinc-400">Clear the filters or jump to another month.</p>
+            </div>
+          )}
         </div>
       </div>
 

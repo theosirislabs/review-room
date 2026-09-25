@@ -102,6 +102,13 @@ describe("ClientView preview mode", () => {
      expect(screen.getByPlaceholderText("Leave feedback…")).not.toBeNull();
   });
 
+  it("keeps profile tiles in a 3:4 media ratio", () => {
+    renderView(false);
+
+    const tile = screen.getByRole("button", { name: "View post: Visible post" });
+    expect(tile.className).toContain("aspect-[3/4]");
+  });
+
   it("uses the named reviewer for feedback attribution", async () => {
     const user = userEvent.setup();
     const onAddComment = vi.fn();

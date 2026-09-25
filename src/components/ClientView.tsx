@@ -161,7 +161,7 @@ function GridTile({ post, index, onClick, isSelected, isSelectMode, onToggleSele
       initial={{ opacity: 0, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1 }}
       transition={{ delay: Math.min(index, 12) * 0.04, duration: 0.3 }}
-                 className={`relative block aspect-square w-full group bg-zinc-200 overflow-hidden rounded-sm border-2 transition-[border-color,box-shadow,transform] focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${isSelected ? "border-blue-500 scale-[0.98] ring-4 ring-blue-500/20" : "border-transparent"}`}
+                 className={`relative block aspect-[3/4] w-full group bg-zinc-200 overflow-hidden rounded-sm border-2 transition-[border-color,box-shadow,transform] focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${isSelected ? "border-blue-500 scale-[0.98] ring-4 ring-blue-500/20" : "border-transparent"}`}
        aria-label={`${isSelectMode ? "Select" : "View"} post: ${post.title}`}
        aria-pressed={isSelectMode ? isSelected : undefined}
     >
