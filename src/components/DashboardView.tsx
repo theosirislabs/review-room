@@ -360,7 +360,7 @@ export default function DashboardView({
                         <div className="flex items-center gap-2">
                             <button
                                 onClick={toggleTheme}
-                                className="p-2 rounded-xl text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50 transition-colors"
+                                 className="rounded-xl p-2 text-zinc-500 transition-colors hover:bg-zinc-800/50 hover:text-zinc-300 lg:hidden"
                                 title={theme === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode"}
                             >
                                 {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
@@ -413,7 +413,7 @@ export default function DashboardView({
                             </div>
                             <button
                                 onClick={() => setShowUpdatesModal(true)}
-                                className="relative p-2 rounded-xl text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50 transition-colors"
+                                 className="relative rounded-xl p-2 text-zinc-500 transition-colors hover:bg-zinc-800/50 hover:text-zinc-300 lg:hidden"
                                 title="What's new"
                             >
                                 <Megaphone className="w-4 h-4" />
@@ -424,20 +424,20 @@ export default function DashboardView({
                                 )}
                             </button>
                             {isSuperAdmin && (
-                                <Button variant="secondary" onClick={() => setShowUserModal(true)} icon={<Shield className="w-4 h-4" />}>
-                                    <span className="hidden lg:inline">Users</span>
-                                </Button>
+                                 <Button variant="secondary" onClick={() => setShowUserModal(true)} icon={<Shield className="w-4 h-4" />} className="lg:hidden">
+                                     <span className="hidden lg:inline">Users</span>
+                                 </Button>
                             )}
                             {isSuperAdmin && (
-                                <Button variant="secondary" onClick={() => setShowMcpModal(true)} icon={<Bot className="w-4 h-4" />}>
-                                    <span className="hidden lg:inline">MCP</span>
-                                </Button>
+                                 <Button variant="secondary" onClick={() => setShowMcpModal(true)} icon={<Bot className="w-4 h-4" />} className="lg:hidden">
+                                     <span className="hidden lg:inline">MCP</span>
+                                 </Button>
                             )}
                             <Button
                                 variant={showActivity ? "primary" : "secondary"}
                                 onClick={() => setShowActivity(v => !v)}
                                 icon={<TrendingUp className="w-4 h-4" />}
-                                className="hidden xl:flex"
+                                 className="flex lg:hidden"
                             >
                                 Activity
                             </Button>
@@ -447,9 +447,9 @@ export default function DashboardView({
                                         <span className="hidden xl:inline">New Workspace</span>
                                         <span className="xl:hidden">New</span>
                                     </Button>
-                                    <Button variant="secondary" onClick={() => openManager("list")} icon={<Settings className="w-4 h-4" />}>
-                                        <span className="hidden lg:inline">Manage</span>
-                                    </Button>
+                                     <Button variant="secondary" onClick={() => openManager("list")} icon={<Settings className="w-4 h-4" />} className="lg:hidden">
+                                         <span className="hidden lg:inline">Manage</span>
+                                     </Button>
                                 </>
                             )}
                         </div>

@@ -23,7 +23,6 @@ import { readReviewerPreference, normalizeReviewerName } from "../reviewerProfil
 import ShareClientLinkModal from "./ShareClientLinkModal";
 import { useTheme } from "../theme";
 import { schedulingPatchForPost } from "../agencyCalendar";
-import { normalizeGlobalOverviewStats, type GlobalOverviewCard, type GlobalStatsTenant } from "../globalStats";
 import OsirisLogo from "./OsirisLogo";
 
 const AnalyticsView = lazy(() => import("./AnalyticsView"));
@@ -168,21 +167,6 @@ export default function InternalView({
       })
       .catch(() => {});
   }, [adminToken, currentUser]);
-
-  // ── Global Stats ──────────────────────────────────────────────
-  const [globalStats, setGlobalStats] = useState<GlobalOverviewCard[]>([]);
-  const [showGlobalOverview, setShowGlobalOverview] = useState(false);
-
-  useEffect(() => {
-    if (showGlobalOverview && adminToken) {
-      fetch("/api/stats", {
-        headers: { Authorization: `Bearer ${adminToken}` }
-      })
-        .then(res => res.ok ? res.json() : { perTenant: [] })
-        .then(data => setGlobalStats(normalizeGlobalOverviewStats(Array.isArray(data?.perTenant) ? data.perTenant as GlobalStatsTenant[] : [])))
-        .catch(console.error);
-    }
-  }, [showGlobalOverview, adminToken]);
 
   const refreshWorkspaceCatalog = useCallback(() => {
     if (!_tenantId || !adminToken) return;
@@ -611,11 +595,11 @@ export default function InternalView({
             ].map(({ id, label, Icon }) => (
               <button
                 key={id}
-                onClick={() => { setViewMode(id); setShowGlobalOverview(false); }}
-                className={`group relative flex h-11 w-11 items-center justify-center rounded-xl transition-colors ${viewMode === id && !showGlobalOverview ? "bg-blue-600 text-white" : "text-zinc-500 hover:bg-zinc-900 hover:text-zinc-100"}`}
-                aria-label={label}
-                title={label}
-                aria-pressed={viewMode === id && !showGlobalOverview}
+                 onClick={() => setViewMode(id)}
+                 className={`group relative flex h-11 w-11 items-center justify-center rounded-xl transition-colors ${viewMode === id ? "bg-blue-600 text-white" : "text-zinc-500 hover:bg-zinc-900 hover:text-zinc-100"}`}
+                 aria-label={label}
+                 title={label}
+                 aria-pressed={viewMode === id}
               >
                 <Icon className="h-5 w-5" />
                 <span className="pointer-events-none absolute left-14 z-50 hidden rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-[10px] font-semibold text-zinc-100 shadow-lg group-hover:block">{label}</span>
@@ -709,29 +693,7 @@ export default function InternalView({
         </div>
 
         <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-          {/* View Toggle */}
-          <div className="flex items-center gap-1.5 bg-zinc-100 p-1 rounded-xl shrink-0">
-            {(["grid", "calendar", "analytics"] as const).map(v => {
-              const icons = { grid: Grid3X3, calendar: Calendar, analytics: BarChart2 };
-              const Icon = icons[v];
-              return (
-                 <button key={v} onClick={() => { setViewMode(v); setShowGlobalOverview(false); }} title={v.charAt(0).toUpperCase() + v.slice(1)} aria-label={`${v.charAt(0).toUpperCase() + v.slice(1)} view`} aria-pressed={viewMode === v && !showGlobalOverview}
-                   className={`p-2 rounded-lg transition-all ${viewMode === v && !showGlobalOverview ? "bg-white shadow-sm text-zinc-900" : "text-zinc-400 hover:text-zinc-600"}`}>
-                  <Icon className="w-4 h-4" />
-                </button>
-              );
-            })}
-            <button
-              onClick={() => setShowGlobalOverview(!showGlobalOverview)}
-               className={`p-2 rounded-lg transition-all ${showGlobalOverview ? "bg-white shadow-sm text-zinc-900" : "text-zinc-400 hover:text-zinc-600"}`}
-               title="Global Overview"
-               aria-label="Global Overview"
-               aria-pressed={showGlobalOverview}
-            >
-              <Layout className="w-4 h-4" />
-            </button>
-          </div>
-          <div className="relative group flex-1 sm:flex-none sm:min-w-[220px]">
+           <div className="relative group w-full sm:w-auto sm:flex-1 sm:flex-none sm:min-w-[220px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400 group-focus-within:text-blue-500 transition-colors" />
             <input
               type="text"
@@ -752,17 +714,17 @@ export default function InternalView({
            <button onClick={() => setShowShareModal(true)} className="flex items-center gap-2 bg-white border border-zinc-200 hover:border-zinc-300 text-zinc-700 px-4 py-2.5 rounded-xl text-sm font-bold transition-all shadow-sm active:scale-95" aria-label="Share client review links">
              <Link className="w-4 h-4" /> <span className="hidden sm:inline">Share links</span>
            </button>
-          <button
-            onClick={toggleTheme}
-            className="flex items-center gap-2 bg-white border border-zinc-200 hover:border-zinc-300 text-zinc-700 px-3 py-2.5 rounded-xl text-sm font-bold transition-all shadow-sm active:scale-95"
-            title={theme === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode"}
+           <button
+             onClick={toggleTheme}
+             className="flex items-center gap-2 bg-white border border-zinc-200 hover:border-zinc-300 text-zinc-700 px-3 py-2.5 rounded-xl text-sm font-bold transition-all shadow-sm active:scale-95 lg:hidden"
+             title={theme === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode"}
           >
             {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
           </button>
           {adminToken && currentUser && (
-            <button
-              onClick={() => setShowUpdatesModal(true)}
-              className="relative flex items-center gap-2 bg-white border border-zinc-200 hover:border-zinc-300 text-zinc-700 px-3 py-2.5 rounded-xl text-sm font-bold transition-all shadow-sm active:scale-95"
+             <button
+               onClick={() => setShowUpdatesModal(true)}
+               className="relative flex items-center gap-2 bg-white border border-zinc-200 hover:border-zinc-300 text-zinc-700 px-3 py-2.5 rounded-xl text-sm font-bold transition-all shadow-sm active:scale-95 lg:hidden"
               title="What's new"
             >
               <Megaphone className="w-4 h-4" />
@@ -776,7 +738,7 @@ export default function InternalView({
               {currentUser.username.split("@")[0]}
             </span>
           )}
-          <button onClick={() => setShowCampaignModal(true)} className="flex items-center gap-2 bg-white border border-zinc-200 hover:border-zinc-300 text-zinc-700 px-3 py-2.5 rounded-xl text-sm font-bold transition-all shadow-sm active:scale-95" title="Campaigns">
+           <button onClick={() => setShowCampaignModal(true)} className="flex items-center gap-2 bg-white border border-zinc-200 hover:border-zinc-300 text-zinc-700 px-3 py-2.5 rounded-xl text-sm font-bold transition-all shadow-sm active:scale-95 lg:hidden" title="Campaigns">
             <Flag className="w-4 h-4" /> <span className="hidden sm:inline">Campaigns</span>
           </button>
           {isSuperAdmin && (
@@ -787,46 +749,27 @@ export default function InternalView({
         </div>
       </div>
 
-      {/* Global Overview Content */}
-      {showGlobalOverview && (
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mb-10">
-          <h2 className="text-xl font-bold text-zinc-900 mb-6 flex items-center gap-2">
-            <Layout className="w-5 h-5 text-blue-500" /> Agency Global Overview
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {globalStats.map((s: any) => (
-              <div key={s.id} onClick={() => { _onSwitchTenant(s.id); setShowGlobalOverview(false); }}
-                className="group bg-white border border-zinc-200 p-5 rounded-2xl hover:border-blue-400 hover:shadow-xl hover:shadow-blue-500/5 transition-all cursor-pointer relative overflow-hidden">
-                <div className="absolute top-0 right-0 p-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <ChevronRight className="w-4 h-4 text-blue-500" />
-                </div>
-                <h3 className="font-bold text-zinc-900 mb-4">{s.name}</h3>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-zinc-50 p-2 rounded-lg">
-                    <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Total</p>
-                    <p className="text-lg font-black text-zinc-900">{s.totalPosts}</p>
-                  </div>
-                  <div className={`p-2 rounded-lg ${s.blocked > 0 ? "bg-red-50" : "bg-zinc-50"}`}>
-                    <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Blocked</p>
-                    <p className={`text-lg font-black ${s.blocked > 0 ? "text-red-600" : "text-zinc-900"}`}>{s.blocked}</p>
-                  </div>
-                  <div className="bg-blue-50 p-2 rounded-lg">
-                    <p className="text-[10px] font-bold text-blue-400 uppercase tracking-widest">Needs Review</p>
-                    <p className="text-lg font-black text-blue-700">{s.needsReview}</p>
-                  </div>
-                  <div className="bg-emerald-50 p-2 rounded-lg">
-                    <p className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">Approved</p>
-                    <p className="text-lg font-black text-emerald-700">{s.approved}</p>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </motion.div>
-      )}
+      <nav className="mb-4 flex items-center gap-1 overflow-x-auto rounded-xl border border-zinc-800 bg-zinc-900/70 p-1 lg:hidden" aria-label="Agency views">
+        {[
+          { id: "grid" as const, label: "Workflow", Icon: Grid3X3 },
+          { id: "calendar" as const, label: "Calendar", Icon: Calendar },
+          { id: "analytics" as const, label: "Analytics", Icon: BarChart2 },
+        ].map(({ id, label, Icon }) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setViewMode(id)}
+            aria-current={viewMode === id ? "page" : undefined}
+            className={`flex min-h-10 flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-lg px-3 text-xs font-semibold transition-colors ${viewMode === id ? "bg-blue-600 text-white" : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"}`}
+          >
+            <Icon className="h-4 w-4" />
+            {label}
+          </button>
+        ))}
+      </nav>
 
       {/* Calendar View */}
-      {viewMode === "calendar" && !showGlobalOverview && (
+      {viewMode === "calendar" && (
         <div className="rr-operations-surface mb-8">
           <CalendarView
             posts={filteredPosts}
@@ -844,7 +787,7 @@ export default function InternalView({
       )}
 
       {/* Analytics View */}
-      {viewMode === "analytics" && !showGlobalOverview && (
+      {viewMode === "analytics" && (
         <div className="rr-operations-surface mb-8">
           <Suspense fallback={<div role="status" className="rounded-2xl border border-zinc-200 bg-white p-8 text-sm text-zinc-500">Loading analytics…</div>}>
             <AnalyticsView tenantId={_tenantId} adminToken={adminToken} brandName={brandName} />
@@ -857,7 +800,7 @@ export default function InternalView({
         <div className="flex flex-wrap items-center gap-2 mb-6">
           <div className="flex items-center gap-1 bg-zinc-100 p-1 rounded-2xl">
             {[
-              { id: "workflow", label: "Workflow" },
+               { id: "workflow", label: "All posts" },
               { id: "blocked", label: "Blocked" },
               { id: "archived", label: "Archived" },
             ].map((tab) => (
@@ -865,7 +808,7 @@ export default function InternalView({
                 key={tab.id}
                  onClick={() => setActiveTab(tab.id as any)}
                  aria-pressed={activeTab === tab.id}
-                 className={`px-3 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all ${activeTab === tab.id ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-500 hover:text-zinc-700"}`}
+                  className={`px-3 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all ${activeTab === tab.id ? "bg-blue-600 text-white shadow-sm" : "text-zinc-400 hover:text-zinc-100"}`}
               >
                 {tab.label}
               </button>
