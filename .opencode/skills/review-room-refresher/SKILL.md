@@ -5,56 +5,51 @@ description: Use when refreshing, mapping, maintaining, deploying, or syncing th
 
 # Review Room Refresher
 
-Use this skill to rebuild an accurate project map before changing Review Room, then carry the change through verification, deployment, and repository sync. Treat handoff notes as historical context, not as the source of truth.
+Rebuild an accurate project map before changing Review Room, then carry the change through verification, deployment, and repository sync. Handoff notes and this skill are context, not truth: verify against the live checkout, the canonical repository, and the running container before acting.
+
+Detail lives in two companions:
+
+- `references/runbook.md` — copy-pasteable command sequences for refresh, gates, deploy, verify, rollback.
+- `references/known-traps.md` — the failures that have actually cost time, with detection and fixes.
 
 ## Source-of-truth order
 
-1. Inspect the live checkout and runtime before relying on notes.
-2. Inspect the canonical GitHub repository and fetched `origin/main` before committing or pushing.
-3. Inspect the running container, image, health endpoint, and recent logs.
-4. Use local working copies only as candidate implementations; never deploy one blindly.
-5. Reconcile contradictions explicitly and record the resolved state.
+1. Canonical GitHub repository and fetched `origin/main`.
+2. Live production checkout on the host.
+3. Running container, image, health endpoint, recent logs.
+4. Local working copy as a *candidate* only; never deploy it blind.
+5. Reconcile contradictions out loud and record the resolved state in the report.
 
-## Known project anchors
+If two sources disagree, the runtime wins for behavior, the repository wins for intent.
 
-- Canonical repository: `theosirislabs/review-room`, branch `main`.
-- Production checkout: `/root/review-room-project`.
-- Live URL: `https://review-room.theosirislabs.com`.
-- Runtime container: `review-room-app`.
-- Backups: `/root/osiris/osiris_backups`.
-- The local candidate path is environment-specific; discover it before using it.
-- Production data and uploads are runtime state and are ignored by Git.
+## Two classes of knowledge
 
-## Refresh checklist
+**Stable invariants** — treat as architecture, not as trivia. Re-confirm only if something breaks:
 
-Run read-only checks first:
+- Canonical repository `theosirislabs/review-room`, branch `main`.
+- Compose service `review-room` produces container `review-room-app` from image `osiris-review-room:latest`.
+- Production checkout `/root/review-room-project`; data is a bind mount `./data:/app/data` (SQLite `data/osiris.db` + `data/uploads`), so it survives image swaps and is never in Git.
+- Backups live under `/root/osiris/osiris_backups`.
+- Theme architecture: agency shell is `.rr-agency` driven by `data-theme`; the client surface is `.rr-client` driven by `data-client-theme`, and the client surface renders *inside* the agency shell during staff preview.
 
-```sh
-git -C /root/review-room-project status --short
-git -C /root/review-room-project remote -v
-git -C /root/review-room-project fetch origin main
-git -C /root/review-room-project log --oneline --left-right main...origin/main
-git -C /root/review-room-project diff --stat
-ssh root@161.97.81.21 'docker ps --format "{{.Names}}\t{{.Image}}\t{{.Status}}" | grep review-room'
-ssh root@161.97.81.21 'docker inspect review-room-app --format "{{.Image}} {{.State.Status}} {{.State.Health.Status}} {{.RestartCount}}"'
-curl -fsS https://review-room.theosirislabs.com/api/health
-```
+**Environment values** — re-verify, never trust from memory:
 
-Do not print tokens, passwords, cookies, or environment values. Report only token presence, lengths, hashes, or equality.
+- Host, local checkout path, dev/preview port, image tags, deployed digests. Discover them with the discovery block in `references/runbook.md` and echo the resolved values in your report.
 
 ## Architecture map
 
-- `src/App.tsx`: route extraction, auth bootstrap, token consumption, lazy surface selection, and client preview routing.
-- `src/components/DashboardView.tsx`: agency-wide client cards, access-link actions, client profile entry point, and staff navigation.
-- `src/components/InternalView.tsx`: agency workflow board, post detail, share-set actions, and internal/client preview controls.
-- `src/components/ClientView.tsx`: client-facing grid/schedule, reviewer decisions, feedback, and named-reviewer display.
+- `src/App.tsx`: route extraction, auth bootstrap, token consumption, lazy surface selection, client preview routing, realtime connection flag.
+- `src/components/DashboardView.tsx`: agency-wide client cards, access-link actions, client profile entry point, staff navigation.
+- `src/components/InternalView.tsx`: agency rail/nav, workflow board, post detail, share-set actions, internal/client preview controls, embeds `CalendarView`.
+- `src/components/CalendarView.tsx`: month grid, agenda, filters, schedule health, responsive dated-item list.
+- `src/components/ClientView.tsx`: client-facing profile grid, post viewer, reviewer decisions, feedback, named-reviewer display, client theme toggle.
 - `src/components/ShareClientLinkModal.tsx`: named client-link creation and per-browser reviewer remembering.
-- `src/reviewerProfile.ts`: reviewer-name normalization, local preference keys, and URL-fragment helpers.
+- `src/reviewerProfile.ts`: reviewer-name normalization, local preference keys, URL-fragment helpers.
 - `src/clientPostShare.ts` and `src/shareSet.ts`: one-post and multi-post share-link APIs plus clipboard handling.
 - `src/components/TenantManagerModal.tsx`: client profile create/edit UI.
-- `server.ts`: Express REST, Socket.IO events, authentication, tenant/share APIs, media, and SQLite access.
-- `src/types.ts`, `src/utils.ts`: shared contracts and client-safe transformations.
-- `src/mediaUpload.ts`, `src/staticDelivery.ts`, `src/mcp/`, and `scripts/`: supporting media, delivery, MCP, and verification surfaces.
+- `server.ts`: Express REST, Socket.IO events, authentication, tenant/share APIs, media, SQLite access.
+- `src/types.ts`, `src/utils.ts`: shared contracts, client-safe transformations, aspect-ratio helpers.
+- `src/mediaUpload.ts`, `src/staticDelivery.ts`, `src/mcp/`, and `scripts/`: media, delivery, MCP, and verification surfaces.
 - `Dockerfile`, `docker-compose.yml`, `.dockerignore`: runtime packaging and build-context boundaries.
 
 Important route families:
@@ -65,42 +60,45 @@ Important route families:
 - `/agency/:tenantId`: internal workspace.
 - `?preview=client`: staff-only client preview.
 
-Reviewer names belong in the URL fragment (`#reviewer=...`) and local browser preference storage. Fragments are not sent to the server. Do not add reviewer PII to the tenant schema unless a later product decision explicitly requires durable server-side attribution.
+Reviewer names belong in the URL fragment (`#reviewer=...`) and local browser preference storage. Fragments never reach the server. Do not add reviewer PII to the tenant schema unless a product decision explicitly requires durable server-side attribution.
 
-## Safe implementation and deployment
+## Workflow
 
-1. Read the relevant files and inspect the current diff before editing.
-2. Keep changes narrow; separate frontend UX, server behavior, and security-token changes.
-3. Run the project gates from a clean, dependency-complete workspace:
-   - `npm test -- --no-cache`
+1. **Refresh** — run the read-only discovery block. Record the production commit, divergence, image, and health.
+2. **Implement locally** — narrow diffs; keep frontend UX, server behavior, and security-token changes separable. Read neighbouring code before writing.
+3. **Gates** — in the local checkout, with dependencies installed:
    - `npm run lint`
+   - `npm test -- --no-cache`
    - `npm run build`
-   - `npm run test:bundles` when that script exists.
-4. If the production host has production-only dependencies or known unrelated type errors, use a disposable copy with dependencies installed and record the limitation; do not “fix” unrelated MCP errors as part of a feature.
-5. Before a live change, create a source/data backup and tag the current image as a rollback image.
-6. Build a Docker image from the production-derived source, not from an unrelated local candidate.
-7. Replace the runtime only after the image build succeeds; verify container health, `/api/health`, public routes, media Range behavior, and read-only behavior.
-8. For client mutations, verify that preview/read-only checks make zero write requests.
-9. If verification fails, restore the tagged image and inspect logs before retrying.
+   - `npm run test:bundles` when present
+   - `git diff --check`
+4. **Visual pass** — verify the surfaces the change touches at mobile and desktop widths, in every theme the change affects. Client surfaces are auth/token gated in production, so do visual verification on the local build (see `known-traps.md`).
+5. **Commit and push** — fetch first, stage only source/tests/config, never secrets or data. Fast-forward only; no force-push, no branch reset.
+6. **Deploy** — follow the runbook exactly: backup, rollback tag, production-derived build, `docker compose up -d review-room`, then the verification battery. Never swap the runtime before the image builds.
+7. **Prove it shipped** — compare served asset filenames with the image's `dist`, and grep the built assets for a marker string unique to the change.
+8. **Rollback if verification fails** — retag the rollback image to `latest`, `docker compose up -d review-room`, re-verify, then read logs before retrying.
+9. **Report** in the format below.
 
-## GitHub synchronization
+## Non-negotiables
 
-1. Fetch `origin/main` and inspect `main...origin/main` before staging.
-2. Preserve intentional live application changes and preserve remote documentation/security files unless the product decision explicitly removes them.
-3. Stage only source, tests, configuration, and intentional project skills; never stage `.env`, databases, uploads, logs, or credentials.
-4. Review `git diff`, `git diff --check`, status, and recent history before committing.
-5. Use a normal merge or fast-forward push. Never force-push, reset a shared branch, or discard remote-only commits.
-6. After pushing, record the pushed commit, deployed image digest, rollback tag, and verification results.
+- Never print tokens, passwords, cookies, or environment values; report presence, length, or equality only.
+- Never copy or tar the whole `data/` tree to back up a code deploy; it is ~15G of uploads. Back up source and SQLite only.
+- Never `docker compose down -v`, delete `data/`, or run `git reset --hard` on the production checkout.
+- Never fetch a share token to make a test pass; use the local build for gated surfaces.
+- Never leave a deploy half-finished: backup, rollback tag, and verification results are part of "done".
 
 ## Refresh report format
 
-At the end of a refresh, report:
-
-- Verified source commit and branch divergence.
+- Verified source commit and branch divergence (local, production, `origin/main`).
 - Files and product behavior changed.
-- Tests/build/typecheck results and any pre-existing failures.
-- Backup and rollback tag.
-- Deployed image digest and container health.
-- Public and mutation-safety checks.
-- GitHub commit/push result.
-- Follow-up risks, especially raw share-token security and server-side decision attribution.
+- Gate results, plus any pre-existing failures you did not introduce.
+- Backup path and rollback tag.
+- Deployed image digest, container status, health, restart count.
+- Public route checks and mutation-safety probe results.
+- Proof the change is in the served bundle.
+- GitHub commit and push result.
+- Follow-up risks, especially raw share-token security, server-side decision attribution, and leftover containers or stale images.
+
+## Keeping this skill honest
+
+When a change alters an anchor, route family, service name, theme attribute, or deploy step, update this skill and `references/` in the same change. If a command here fails, fix the skill first, then retry the operation.
